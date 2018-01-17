@@ -824,7 +824,7 @@ static int dwc_otg_urb_enqueue(struct usb_hcd *hcd,
 	if ((usb_pipetype(urb->pipe) == PIPE_ISOCHRONOUS)
 	    || (usb_pipetype(urb->pipe) == PIPE_INTERRUPT)) {
 		if (!dwc_otg_hcd_is_bandwidth_allocated
-		    (dwc_otg_hcd, ref_ep_hcpriv)) {
+		    (dwc_otg_hcd, *ref_ep_hcpriv)) {
 			alloc_bandwidth = 1;
 		}
 	}
