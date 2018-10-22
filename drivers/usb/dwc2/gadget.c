@@ -4939,6 +4939,7 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg)
 					  epnum, 0);
 	}
 
+	hsotg->gadget.quirk_ep_out_aligned_size = true;
 	dwc2_hsotg_dump(hsotg);
 
 	return 0;
