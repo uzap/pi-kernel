@@ -1012,10 +1012,34 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 		io_data->use_sg = gadget->sg_supported && data_len > PAGE_SIZE;
 		spin_unlock_irq(&epfile->ffs->eps_lock);
 
-		data = ffs_alloc_buffer(io_data, data_len);
+retry_malloc:
+		data = kmalloc(data_len, GFP_KERNEL | __GFP_NOWARN);
 		if (unlikely(!data)) {
-			ret = -ENOMEM;
-			goto error_mutex;
+			/*
+			 * f_fs daemons usually use large size buffer for
+			 * performance. However, this can cause failure of
+			 * kmalloc() due to buddy fragmentation, even if there
+			 * is available memory and thus it can be compacted by
+			 * by kswapd. Therefore, instead of just returning error
+			 * to daemon in the case of failure of kmalloc(), give
+			 * the second chance to allocate buffer with a half size
+			 * until it really fails due to memory shortage.
+			 */
+			if (unlikely(data_len <= PAGE_SIZE)) {
+				ret = -ENOMEM;
+				goto error_mutex;
+			}
+
+			data_len = data_len >> 1;
+
+			if (io_data->read) {
+				spin_lock_irq(&epfile->ffs->eps_lock);
+				data_len = usb_ep_align_maybe(gadget,
+						ep->ep, data_len);
+				spin_unlock_irq(&epfile->ffs->eps_lock);
+			}
+
+			goto retry_malloc;
 		}
 		if (!io_data->read &&
 		    !copy_from_iter_full(data, data_len, &io_data->data)) {
