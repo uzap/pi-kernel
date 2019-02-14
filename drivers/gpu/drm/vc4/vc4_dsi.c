@@ -1257,11 +1257,17 @@ static ssize_t vc4_dsi_host_transfer(struct mipi_dsi_host *host,
 	DSI_PORT_WRITE(TXPKT1H, pkth);
 	DSI_PORT_WRITE(TXPKT1C, pktc);
 
+	/*
+	 * WORKAROUND: The timeout below bas been reduced from 1000 to 100msecs.
+	 * Interrupt does not occur even if DSI transmission is performed,
+	 * so reduce timeout.
+	 */
 	if (!wait_for_completion_timeout(&dsi->xfer_completion,
-					 msecs_to_jiffies(1000))) {
+					 msecs_to_jiffies(100))) {
 		dev_err(&dsi->pdev->dev, "transfer interrupt wait timeout");
 		dev_err(&dsi->pdev->dev, "instat: 0x%08x\n",
 			DSI_PORT_READ(INT_STAT));
+		dev_warn(&dsi->pdev->dev, "WORKAROUND: Interrupt does not occur even if DSI transmission.");
 		ret = -ETIMEDOUT;
 	} else {
 		ret = dsi->xfer_result;
