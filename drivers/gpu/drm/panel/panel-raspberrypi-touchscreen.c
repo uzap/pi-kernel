@@ -262,6 +262,7 @@ static void rpi_touchscreen_i2c_write(struct rpi_touchscreen *ts,
 
 static int rpi_touchscreen_write(struct rpi_touchscreen *ts, u16 reg, u32 val)
 {
+	int ret;
 	u8 msg[] = {
 		reg,
 		reg >> 8,
@@ -271,7 +272,14 @@ static int rpi_touchscreen_write(struct rpi_touchscreen *ts, u16 reg, u32 val)
 		val >> 24,
 	};
 
-	mipi_dsi_generic_write(ts->dsi, msg, sizeof(msg));
+	ret = mipi_dsi_generic_write(ts->dsi, msg, sizeof(msg));
+	/*
+	 * WORKAROUND: There is a problem that timeout occurs even though
+	 * dsi interrupts occur. Add error handling to write once more
+	 * when timeout occurs.
+	 */
+	if (ret == -ETIMEDOUT)
+		mipi_dsi_generic_write(ts->dsi, msg, sizeof(msg));
 
 	return 0;
 }
