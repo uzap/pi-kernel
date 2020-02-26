@@ -667,7 +667,12 @@ void dwc2_force_dr_mode(struct dwc2_hsotg *hsotg)
 
 		break;
 	case USB_DR_MODE_PERIPHERAL:
-		dwc2_force_mode(hsotg, false);
+		/*
+		 * To prevent early notification to host without any
+		 * preparation about device descriptor, forcing mode
+		 * is defered until gadget driver is ready.
+		 */
+		/* dwc2_force_mode(hsotg, false); */
 		break;
 	case USB_DR_MODE_OTG:
 		dwc2_clear_force_mode(hsotg);

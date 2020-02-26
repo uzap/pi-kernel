@@ -4469,6 +4469,7 @@ static int dwc2_hsotg_udc_start(struct usb_gadget *gadget,
 	hsotg->gadget.speed = USB_SPEED_UNKNOWN;
 
 	if (hsotg->dr_mode == USB_DR_MODE_PERIPHERAL) {
+		dwc2_force_mode(hsotg, false);
 		ret = dwc2_lowlevel_hw_enable(hsotg);
 		if (ret)
 			goto err;

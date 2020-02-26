@@ -759,7 +759,8 @@ static void dwc2_get_dev_hwparams(struct dwc2_hsotg *hsotg)
 	if (hsotg->dr_mode == USB_DR_MODE_HOST)
 		return;
 
-	dwc2_force_mode(hsotg, false);
+	if (hsotg->dr_mode != USB_DR_MODE_PERIPHERAL)
+		dwc2_force_mode(hsotg, false);
 
 	gnptxfsiz = dwc2_readl(hsotg, GNPTXFSIZ);
 
