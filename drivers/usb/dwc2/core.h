@@ -676,7 +676,7 @@ struct dwc2_hw_params {
 };
 
 /* Size of control and EP0 buffers */
-#define DWC2_CTRL_BUFF_SIZE 8
+#define DWC2_CTRL_BUFF_SIZE 512
 
 /**
  * struct dwc2_gregs_backup - Holds global registers state before
