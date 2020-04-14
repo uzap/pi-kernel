@@ -1516,6 +1516,8 @@ static noinline void __init kernel_init_freeable(void)
 	smp_init();
 	sched_init_smp();
 
+	kthread_run(defer_free_memblock, NULL, "defer_mem");
+
 	padata_init();
 	page_alloc_init_late();
 	/* Initialize page ext after all struct pages are initialized. */

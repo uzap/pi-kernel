@@ -86,6 +86,7 @@ struct memblock {
 };
 
 extern struct memblock memblock;
+extern int defer_free_memblock(void *unused);
 
 #ifndef CONFIG_ARCH_KEEP_MEMBLOCK
 #define __init_memblock __meminit
