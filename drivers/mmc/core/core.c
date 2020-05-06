@@ -2058,6 +2058,7 @@ int mmc_set_blocklen(struct mmc_card *card, unsigned int blocklen)
 }
 EXPORT_SYMBOL(mmc_set_blocklen);
 
+#if 0
 static void mmc_hw_reset_for_init(struct mmc_host *host)
 {
 	mmc_pwrseq_reset(host);
@@ -2066,6 +2067,7 @@ static void mmc_hw_reset_for_init(struct mmc_host *host)
 		return;
 	host->ops->hw_reset(host);
 }
+#endif
 
 /**
  * mmc_hw_reset - reset the card in hardware
@@ -2138,7 +2140,9 @@ static int mmc_rescan_try_freq(struct mmc_host *host, unsigned freq)
 	 * Some eMMCs (with VCCQ always on) may not be reset after power up, so
 	 * do a hardware reset if possible.
 	 */
+#if 0
 	mmc_hw_reset_for_init(host);
+#endif
 
 	/*
 	 * sdio_reset sends CMD52 to reset card.  Since we do not know
