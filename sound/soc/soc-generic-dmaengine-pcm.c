@@ -118,6 +118,9 @@ dmaengine_pcm_set_runtime_hwparams(struct snd_soc_component *component,
 		return -EINVAL;
 	}
 
+	if (!dma_dev)
+		return -ENODEV;
+
 	if (pcm->config && pcm->config->pcm_hardware)
 		return snd_soc_set_runtime_hwparams(substream,
 				pcm->config->pcm_hardware);
