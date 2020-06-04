@@ -145,7 +145,7 @@ ZSTD_STATIC size_t BIT_readBitsFast(BIT_DStream_t *bitD, unsigned nbBits);
 /*-**************************************************************
 *  Internal functions
 ****************************************************************/
-ZSTD_STATIC unsigned BIT_highbit32(register U32 val) { return 31 - __builtin_clz(val); }
+ZSTD_STATIC unsigned BIT_highbit32(register U32 val) { return __builtin_clz(val) ^ 31; }
 
 /*=====    Local Constants   =====*/
 static const unsigned BIT_mask[] = {0,       1,       3,       7,	0xF,      0x1F,     0x3F,     0x7F,      0xFF,
@@ -333,6 +333,24 @@ ZSTD_STATIC size_t BIT_readBitsFast(BIT_DStream_t *bitD, U32 nbBits)
 	return value;
 }
 
+/*! BIT_reloadDStreamFast() :
+ *  Similar to BIT_reloadDStream(), but with two differences:
+ *  1. bitsConsumed <= sizeof(bitD->bitContainer)*8 must hold!
+ *  2. Returns BIT_DStream_overflow when bitD->ptr < bitD->limitPtr, at this
+ *     point you must use BIT_reloadDStream() to reload.
+ */
+ZSTD_STATIC BIT_DStream_status BIT_reloadDStreamFast(BIT_DStream_t *bitD)
+{
+	if (unlikely(bitD->ptr < bitD->start + sizeof(bitD->bitContainer)))
+		return BIT_DStream_overflow;
+
+	bitD->ptr -= bitD->bitsConsumed >> 3;
+	bitD->bitsConsumed &= 7;
+	bitD->bitContainer = ZSTD_readLEST(bitD->ptr);
+
+	return BIT_DStream_unfinished;
+}
+
 /*! BIT_reloadDStream() :
 *   Refill `bitD` from buffer previously set in BIT_initDStream() .
 *   This function is safe, it guarantees it will not read beyond src buffer.
@@ -344,10 +362,7 @@ ZSTD_STATIC BIT_DStream_status BIT_reloadDStream(BIT_DStream_t *bitD)
 		return BIT_DStream_overflow;
 
 	if (bitD->ptr >= bitD->start + sizeof(bitD->bitContainer)) {
-		bitD->ptr -= bitD->bitsConsumed >> 3;
-		bitD->bitsConsumed &= 7;
-		bitD->bitContainer = ZSTD_readLEST(bitD->ptr);
-		return BIT_DStream_unfinished;
+		return BIT_reloadDStreamFast(bitD);
 	}
 	if (bitD->ptr == bitD->start) {
 		if (bitD->bitsConsumed < sizeof(bitD->bitContainer) * 8)

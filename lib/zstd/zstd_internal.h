@@ -126,34 +126,77 @@ static const U32 OF_defaultNormLog = OF_DEFAULTNORMLOG;
 /*-*******************************************
 *  Shared functions to include for inlining
 *********************************************/
-ZSTD_STATIC void ZSTD_copy8(void *dst, const void *src) {
-	/*
-	 * zstd relies heavily on gcc being able to analyze and inline this
-	 * memcpy() call, since it is called in a tight loop. Preboot mode
-	 * is compiled in freestanding mode, which stops gcc from analyzing
-	 * memcpy(). Use __builtin_memcpy() to tell gcc to analyze this as a
-	 * regular memcpy().
-	 */
-	__builtin_memcpy(dst, src, 8);
-}
-/*! ZSTD_wildcopy() :
-*   custom version of memcpy(), can copy up to 7 bytes too many (8 bytes if length==0) */
-#define WILDCOPY_OVERLENGTH 8
-ZSTD_STATIC void ZSTD_wildcopy(void *dst, const void *src, ptrdiff_t length)
+
+FORCE_INLINE void ZSTD_copy8(void *dst, const void *src)
 {
-	const BYTE* ip = (const BYTE*)src;
-	BYTE* op = (BYTE*)dst;
-	BYTE* const oend = op + length;
-#if defined(GCC_VERSION) && GCC_VERSION >= 70000 && GCC_VERSION < 70200
-	/*
-	 * Work around https://gcc.gnu.org/bugzilla/show_bug.cgi?id=81388.
-	 * Avoid the bad case where the loop only runs once by handling the
-	 * special case separately. This doesn't trigger the bug because it
-	 * doesn't involve pointer/integer overflow.
-	 */
-	if (length <= 8)
-		return ZSTD_copy8(dst, src);
-#endif
+	memcpy(dst, src, 8);
+}
+
+FORCE_INLINE void ZSTD_copy16(void *dst, const void *src)
+{
+	memcpy(dst, src, 16);
+}
+
+enum ZSTD_overlap_e {
+	ZSTD_no_overlap,
+	ZSTD_overlap_src_before_dst,
+	/*  ZSTD_overlap_dst_before_src, */
+};
+
+#define WILDCOPY_OVERLENGTH 32
+#define WILDCOPY_VECLEN 16
+
+/*! ZSTD_wildcopy() :
+ *  Custom version of memcpy(), can over read/write up to WILDCOPY_OVERLENGTH bytes (if length==0)
+ *  @param ovtype controls the overlap detection
+ *         - ZSTD_no_overlap: The source and destination are guaranteed to be at least WILDCOPY_VECLEN bytes apart.
+ *         - ZSTD_overlap_src_before_dst: The src and dst may overlap, but they MUST be at least 8 bytes apart.
+ *           The src buffer must be before the dst buffer.
+ */
+FORCE_INLINE void ZSTD_wildcopy(void *dst, const void *src, ptrdiff_t length, enum ZSTD_overlap_e const ovtype)
+{
+	ptrdiff_t diff = (BYTE *)dst - (const BYTE *)src;
+	const BYTE *ip = (const BYTE *)src;
+	BYTE *op = (BYTE *)dst;
+	BYTE *const oend = op + length;
+
+	if (ovtype == ZSTD_overlap_src_before_dst && diff < WILDCOPY_VECLEN) {
+		/* Handle short offset copies */
+		do {
+			ZSTD_copy8(op, ip);
+			op += 8;
+			ip += 8;
+		} while (op < oend);
+	} else {
+		ZSTD_copy16(op, ip);
+		op += 16;
+		ip += 16;
+		ZSTD_copy16(op, ip);
+		op += 16;
+		ip += 16;
+		if (op >= oend)
+			return;
+		do {
+			ZSTD_copy16(op, ip);
+			op += 16;
+			ip += 16;
+			ZSTD_copy16(op, ip);
+			op += 16;
+			ip += 16;
+		} while (op < oend);
+	}
+}
+
+/*! ZSTD_wildcopy8() :
+ *  The same as ZSTD_wildcopy(), but it can only overwrite 8 bytes, and works for
+ *  overlapping buffers that are at least 8 bytes apart.
+ */
+ZSTD_STATIC void ZSTD_wildcopy8(void *dst, const void *src, ptrdiff_t length)
+{
+	const BYTE *ip = (const BYTE *)src;
+	BYTE *op = (BYTE *)dst;
+	BYTE *const oend = (BYTE *)op + length;
+
 	do {
 		ZSTD_copy8(op, ip);
 		op += 8;
@@ -253,7 +296,7 @@ void ZSTD_stackFree(void *opaque, void *address);
 
 /*======  common function  ======*/
 
-ZSTD_STATIC U32 ZSTD_highbit32(U32 val) { return 31 - __builtin_clz(val); }
+ZSTD_STATIC U32 ZSTD_highbit32(U32 val) { return __builtin_clz(val) ^ 31; }
 
 /* hidden functions */
 

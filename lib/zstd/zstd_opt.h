@@ -676,7 +676,7 @@ _storeSequence: /* cur, last_pos, best_mlen, best_off have to be set */
 			}
 
 			ZSTD_updatePrice(seqStorePtr, litLength, anchor, offset, mlen - MINMATCH);
-			ZSTD_storeSeq(seqStorePtr, litLength, anchor, offset, mlen - MINMATCH);
+			ZSTD_storeSeq(seqStorePtr, litLength, anchor, iend, offset, mlen - MINMATCH);
 			anchor = ip = ip + mlen;
 		}
 	} /* for (cur=0; cur < last_pos; ) */
@@ -991,7 +991,7 @@ _storeSequence: /* cur, last_pos, best_mlen, best_off have to be set */
 			}
 
 			ZSTD_updatePrice(seqStorePtr, litLength, anchor, offset, mlen - MINMATCH);
-			ZSTD_storeSeq(seqStorePtr, litLength, anchor, offset, mlen - MINMATCH);
+			ZSTD_storeSeq(seqStorePtr, litLength, anchor, iend, offset, mlen - MINMATCH);
 			anchor = ip = ip + mlen;
 		}
 	} /* for (cur=0; cur < last_pos; ) */

@@ -254,6 +254,7 @@ static size_t HUF_decompress4X2_usingDTable_internal(void *dst, size_t dstSize, 
 		const BYTE *const istart = (const BYTE *)cSrc;
 		BYTE *const ostart = (BYTE *)dst;
 		BYTE *const oend = ostart + dstSize;
+		BYTE *const olimit = oend - 3;
 		const void *const dtPtr = DTable + 1;
 		const HUF_DEltX2 *const dt = (const HUF_DEltX2 *)dtPtr;
 
@@ -278,7 +279,7 @@ static size_t HUF_decompress4X2_usingDTable_internal(void *dst, size_t dstSize, 
 		BYTE *op2 = opStart2;
 		BYTE *op3 = opStart3;
 		BYTE *op4 = opStart4;
-		U32 endSignal;
+		U32 endSignal = 1;
 		DTableDesc const dtd = HUF_getDTableDesc(DTable);
 		U32 const dtLog = dtd.tableLog;
 
@@ -306,8 +307,7 @@ static size_t HUF_decompress4X2_usingDTable_internal(void *dst, size_t dstSize, 
 		}
 
 		/* 16-32 symbols per loop (4-8 symbols per stream) */
-		endSignal = BIT_reloadDStream(&bitD1) | BIT_reloadDStream(&bitD2) | BIT_reloadDStream(&bitD3) | BIT_reloadDStream(&bitD4);
-		for (; (endSignal == BIT_DStream_unfinished) && (op4 < (oend - 7));) {
+		for ( ; (endSignal) & (op4 < olimit); ) {
 			HUF_DECODE_SYMBOLX2_2(op1, &bitD1);
 			HUF_DECODE_SYMBOLX2_2(op2, &bitD2);
 			HUF_DECODE_SYMBOLX2_2(op3, &bitD3);
@@ -324,7 +324,10 @@ static size_t HUF_decompress4X2_usingDTable_internal(void *dst, size_t dstSize, 
 			HUF_DECODE_SYMBOLX2_0(op2, &bitD2);
 			HUF_DECODE_SYMBOLX2_0(op3, &bitD3);
 			HUF_DECODE_SYMBOLX2_0(op4, &bitD4);
-			endSignal = BIT_reloadDStream(&bitD1) | BIT_reloadDStream(&bitD2) | BIT_reloadDStream(&bitD3) | BIT_reloadDStream(&bitD4);
+			endSignal &= BIT_reloadDStreamFast(&bitD1) == BIT_DStream_unfinished;
+			endSignal &= BIT_reloadDStreamFast(&bitD2) == BIT_DStream_unfinished;
+			endSignal &= BIT_reloadDStreamFast(&bitD3) == BIT_DStream_unfinished;
+			endSignal &= BIT_reloadDStreamFast(&bitD4) == BIT_DStream_unfinished;
 		}
 
 		/* check corruption */
@@ -713,6 +716,7 @@ static size_t HUF_decompress4X4_usingDTable_internal(void *dst, size_t dstSize, 
 		const BYTE *const istart = (const BYTE *)cSrc;
 		BYTE *const ostart = (BYTE *)dst;
 		BYTE *const oend = ostart + dstSize;
+		BYTE *const olimit = oend - (sizeof(size_t) - 1);
 		const void *const dtPtr = DTable + 1;
 		const HUF_DEltX4 *const dt = (const HUF_DEltX4 *)dtPtr;
 
@@ -737,7 +741,7 @@ static size_t HUF_decompress4X4_usingDTable_internal(void *dst, size_t dstSize, 
 		BYTE *op2 = opStart2;
 		BYTE *op3 = opStart3;
 		BYTE *op4 = opStart4;
-		U32 endSignal;
+		U32 endSignal = 1;
 		DTableDesc const dtd = HUF_getDTableDesc(DTable);
 		U32 const dtLog = dtd.tableLog;
 
@@ -765,8 +769,7 @@ static size_t HUF_decompress4X4_usingDTable_internal(void *dst, size_t dstSize, 
 		}
 
 		/* 16-32 symbols per loop (4-8 symbols per stream) */
-		endSignal = BIT_reloadDStream(&bitD1) | BIT_reloadDStream(&bitD2) | BIT_reloadDStream(&bitD3) | BIT_reloadDStream(&bitD4);
-		for (; (endSignal == BIT_DStream_unfinished) & (op4 < (oend - (sizeof(bitD4.bitContainer) - 1)));) {
+		for ( ; (endSignal) & (op4 < olimit); ) {
 			HUF_DECODE_SYMBOLX4_2(op1, &bitD1);
 			HUF_DECODE_SYMBOLX4_2(op2, &bitD2);
 			HUF_DECODE_SYMBOLX4_2(op3, &bitD3);
@@ -783,8 +786,11 @@ static size_t HUF_decompress4X4_usingDTable_internal(void *dst, size_t dstSize, 
 			HUF_DECODE_SYMBOLX4_0(op2, &bitD2);
 			HUF_DECODE_SYMBOLX4_0(op3, &bitD3);
 			HUF_DECODE_SYMBOLX4_0(op4, &bitD4);
-
-			endSignal = BIT_reloadDStream(&bitD1) | BIT_reloadDStream(&bitD2) | BIT_reloadDStream(&bitD3) | BIT_reloadDStream(&bitD4);
+			endSignal = likely(
+					(BIT_reloadDStreamFast(&bitD1) == BIT_DStream_unfinished)
+					& (BIT_reloadDStreamFast(&bitD2) == BIT_DStream_unfinished)
+					& (BIT_reloadDStreamFast(&bitD3) == BIT_DStream_unfinished)
+					& (BIT_reloadDStreamFast(&bitD4) == BIT_DStream_unfinished));
 		}
 
 		/* check corruption */
