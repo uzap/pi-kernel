@@ -1083,13 +1083,16 @@ static int dwc2_fs_phy_init(struct dwc2_hsotg *hsotg, bool select_phy)
 			usbcfg |= GUSBCFG_PHYSEL;
 			dwc2_writel(hsotg, usbcfg, GUSBCFG);
 
-			/* Reset after a PHY select */
-			retval = dwc2_core_reset(hsotg, false);
+			if (dwc2_is_host_mode(hsotg)) {
+				/* Reset after a PHY select */
+				retval = dwc2_core_reset(hsotg, false);
 
-			if (retval) {
-				dev_err(hsotg->dev,
-					"%s: Reset failed, aborting", __func__);
-				return retval;
+				if (retval) {
+					dev_err(hsotg->dev,
+						"%s: Reset failed, aborting",
+						__func__);
+					return retval;
+				}
 			}
 		}
 
@@ -1181,12 +1184,14 @@ static int dwc2_hs_phy_init(struct dwc2_hsotg *hsotg, bool select_phy)
 	if (usbcfg != usbcfg_old) {
 		dwc2_writel(hsotg, usbcfg, GUSBCFG);
 
-		/* Reset after setting the PHY parameters */
-		retval = dwc2_core_reset(hsotg, false);
-		if (retval) {
-			dev_err(hsotg->dev,
-				"%s: Reset failed, aborting", __func__);
-			return retval;
+		if (dwc2_is_host_mode(hsotg)) {
+			/* Reset after setting the PHY parameters */
+			retval = dwc2_core_reset(hsotg, false);
+			if (retval) {
+				dev_err(hsotg->dev,
+					"%s: Reset failed, aborting", __func__);
+				return retval;
+			}
 		}
 	}
 
