@@ -302,6 +302,23 @@ config KSM
 	  until a program has madvised that an area is MADV_MERGEABLE, and
 	  root has set /sys/kernel/mm/ksm/run to 1 (if CONFIG_SYSFS is set).
 
+config LKSM
+	bool "Enable lightweight KSM"
+	depends on MMU
+	select KSM
+	help
+	  LKSM is intended to mitigate energy cost of KSM. LKSM sleeps and
+	  waits for incoming events, such as freeze of tasks and user-level
+	  requests.
+
+	  Then, LKSM performs one of two memory deduplication strategies, such as
+	  partial deduplication and full deduplication.
+	  As names of them implying, partial deduplication only scans a subset of
+	  processes, thus it provides a lightweight way. Full deduplication scans
+	  whole processes joined in the KSM scanning list, thus it is same to
+	  original KSM. Due to the level of the incurred event, LKSM performs
+	  a proper deduplication strategy.
+
 config DEFAULT_MMAP_MIN_ADDR
 	int "Low address space to protect from user allocation"
 	depends on MMU
