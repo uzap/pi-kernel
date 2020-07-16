@@ -319,6 +319,14 @@ config LKSM
 	  original KSM. Due to the level of the incurred event, LKSM performs
 	  a proper deduplication strategy.
 
+config LKSM_FILTER
+	bool "Enable LKSM filtering feature"
+	depends on LKSM
+	help
+	  LKSM_FILTER is intended to reduce necessary scans. LKSM records merged
+	  addresses and then used it to filter out unmergeable pages.
+	  It improves energy-efficiency at the expense of somewhat sharing chances.
+
 config DEFAULT_MMAP_MIN_ADDR
 	int "Low address space to protect from user allocation"
 	depends on MMU

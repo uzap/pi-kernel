@@ -173,6 +173,13 @@ struct mm_slot {
 	unsigned long fault_cnt;
 	unsigned long elapsed;
 	int nr_scans;
+
+#ifdef CONFIG_LKSM_FILTER
+	/* used for releasing lksm_region */
+	struct list_head ref_list;
+	int nr_regions;
+#endif
+
 };
 
 /*
@@ -215,6 +222,12 @@ struct ksm_scan {
 	unsigned long nr_full_scan;
 
 	enum lksm_scan_mode scan_mode;
+
+#ifdef CONFIG_LKSM_FILTER
+	struct lksm_region *region;
+	unsigned long vma_base_addr;
+	struct vm_area_struct *cached_vma;
+#endif /* CONFIG_LKSM_FILTER */
 };
 
 /**
@@ -262,11 +275,13 @@ struct stable_node {
  * @rmap_list: next rmap_item in mm_slot's singly-linked rmap_list
  * @anon_vma: pointer to anon_vma for this mm,address, when in stable tree
  * @nid: NUMA node id of unstable tree in which linked (may not match page)
+ * @region: pointer to the mapped region (LKSM feature)
  * @mm: the memory structure this rmap_item is pointing into
  * @address: the virtual address this rmap_item tracks (+ flags in low bits)
  * @oldchecksum: previous checksum of the page at that virtual address
  * @node: rb node of this rmap_item in the unstable tree
  * @head: pointer to stable_node heading this list in the stable tree
+ * @base_addr: used for calculating offset of the address (LKSM feature)
  * @hlist: link into hlist of rmap_items hanging off that stable_node
  */
 struct rmap_item {
@@ -276,6 +291,9 @@ struct rmap_item {
 #ifdef CONFIG_NUMA
 		int nid;		/* when node of unstable tree */
 #endif
+#ifdef CONFIG_LKSM_FILTER
+		struct lksm_region *region; /* when unstable */
+#endif
 	};
 	struct mm_struct *mm;
 	unsigned long address;		/* + low bits used for flags below */
@@ -283,7 +301,14 @@ struct rmap_item {
 	union {
 		struct rb_node node;	/* when node of unstable tree */
 		struct {		/* when listed from stable tree */
+#ifdef CONFIG_LKSM_FILTER
+			union {
+				struct stable_node *head;
+				unsigned long base_addr; /* temporal storage for merge */
+			};
+#else
 			struct stable_node *head;
+#endif /* CONFIG_LKSM_FILTER */
 			struct hlist_node hlist;
 		};
 	};
@@ -445,10 +470,128 @@ struct task_slot {
 #define KSM_MM_LISTED 0x02
 #define KSM_MM_NEWCOMER 0x04
 #define KSM_MM_SCANNED 0x08
+#ifdef CONFIG_LKSM_FILTER
+#define KSM_MM_PREPARED 0x10
+#endif
 
 #define lksm_test_mm_state(mm_slot, bit) (mm_slot->state & bit)
 #define lksm_set_mm_state(mm_slot, bit) (mm_slot->state |= bit)
 #define lksm_clear_mm_state(mm_slot, bit) (mm_slot->state &= ~bit)
+
+#ifdef CONFIG_LKSM_FILTER
+#define LKSM_REGION_HASH_BITS 10
+static DEFINE_HASHTABLE(lksm_region_hash, LKSM_REGION_HASH_BITS);
+spinlock_t lksm_region_lock;
+
+/*
+ * LKSM uses the filter when the region is scanned more than
+ * LKSM_REGION_MATURE round
+ */
+#define LKSM_REGION_MATURE 5
+#define lksm_region_mature(round, region) \
+		((round - region->scan_round) > LKSM_REGION_MATURE)
+
+enum lksm_region_type {
+	LKSM_REGION_HEAP,
+	LKSM_REGION_STACK,
+	LKSM_REGION_FILE1, /* file mapped region: data section */
+	LKSM_REGION_FILE2, /* file mapped region: bss section */
+	LKSM_REGION_CONFLICT, /* conflicted regions: do not filtering */
+	LKSM_REGION_UNKNOWN,
+};
+
+static const char * const region_type_str[] = {
+	"heap",
+	"stack",
+	"file_data",
+	"file_bss",
+	"conflicted",
+	"unknown",
+};
+
+/* sharing statistics for each region type */
+static int region_share[LKSM_REGION_UNKNOWN + 1];
+
+/*
+ * lksm_region: A region represents a physical mapped area.
+ * Each process can have its own instance of a region, namely vma.
+ * Regions for not-a-file-mapped areas like heap and stack just have
+ * abstract representations as symbols.
+ *
+ * LKSM leverages the region for offset-based filtering.
+ * Each region has a filter which records offsets of addresses of
+ * shared pages in the region.
+ * If once a region is matured, LKSM uses the filter to skip scanning of
+ * unsharable pages.
+ *
+ * @type: type of region, refer above enumeration
+ * @len: length of filter (in the number of 64-bit variables)
+ * @ino: inode number if the region is mapped to file
+ * @merge_cnt: the number of merged pages in the region
+ * @filter_cnt: the number of set bits in filter
+ * @scan_round: the birth scan round of this region
+ * @conflict: the count of size changed, clue for conflict
+ * @refcount: if it reaches zero, the region will be freed
+ * @hnode: hash node for finding region by ino
+ * @next: data region can have a next (bss) region
+ * @prev: reverse pointer to data region
+ *
+ * A few notes about bitmap filter variable:
+ * LKSM uses bitmap filter for skipping scan of unsharable pages.
+ * If a region is smaller than 256KB (<= 64 pages),
+ * it can be covered by a bitmap stored in a 64-bit variable.
+ * LKSM only allocates a bitmap array as a filter when the region is
+ * larger than 256KB, otherwise it uses a 64-bit variable as a filter.
+ *
+ * @filter: when the region is bigger than 64 pages
+ * @single_filter: when the region is smaller than or equal to 64 pages
+ */
+#define SINGLE_FILTER_LEN 1 /* a region can be covered by single variable */
+
+struct lksm_region {
+	enum lksm_region_type type;
+	int len;
+	int ino;
+	int merge_cnt;
+	int filter_cnt;
+	int scan_round;
+	int conflict;
+	atomic_t refcount;
+	struct hlist_node hnode;
+	struct lksm_region *next;
+	struct lksm_region *prev;
+	union {
+		unsigned long *filter;
+		unsigned long single_filter;
+	};
+};
+
+/*
+ * lksm_region_ref:
+ * Contains references from processes to regions
+ */
+
+struct lksm_region_ref {
+	struct list_head list; /* listed by mm_slot */
+	struct lksm_region *region;
+};
+
+/* the number of registered lksm_regions */
+static unsigned int lksm_nr_regions;
+
+/* the upper limit for region lookup */
+#define LKSM_REGION_ITER_MAX 8
+
+#define lksm_region_size(start, end) ((int)(end - start) >> PAGE_SHIFT)
+#define lksm_bitmap_size(size) ((size >> 6) + ((size % BITS_PER_LONG) ? 1 : 0))
+
+/* all processes share one lksm_region for their heaps */
+static struct lksm_region heap_region, unknown_region;
+
+static void lksm_register_file_anon_region(struct mm_slot *slot,
+			struct vm_area_struct *vma);
+static struct lksm_region *lksm_find_region(struct vm_area_struct *vma);
+#endif /* CONFIG_LKSM_FILTER */
 
 static int initial_round = 3;
 static unsigned long ksm_crawl_round;
@@ -797,6 +940,27 @@ out:
 	return page;
 }
 
+#ifdef CONFIG_LKSM_FILTER
+static inline int is_heap(struct vm_area_struct *vma)
+{
+	return vma->vm_start <= vma->vm_mm->brk &&
+		vma->vm_end >= vma->vm_mm->start_brk;
+}
+
+/* below code is copied from fs/proc/task_mmu.c */
+
+static int is_stack(struct vm_area_struct *vma)
+{
+	return vma->vm_start <= vma->vm_mm->start_stack &&
+		vma->vm_end >= vma->vm_mm->start_stack;
+}
+
+static int is_exec(struct vm_area_struct *vma)
+{
+	return (vma->vm_flags & VM_EXEC);
+}
+#endif /* CONFIG_LKSM_FILTER */
+
 /*
  * ksm_join: a wrapper function of ksm_enter.
  * The function sets VM_MERGEABLE flag of vmas in the given mm_struct.
@@ -826,6 +990,19 @@ static int ksm_join(struct mm_struct *mm, int frozen)
 				VM_HUGETLB | VM_MIXEDMAP))
 			continue;
 		vma->vm_flags |= VM_MERGEABLE;
+#ifdef CONFIG_LKSM_FILTER
+		/*
+		 * Many page sharings come from library pages because processes
+		 * are sharing runtime framwork of the OS.
+		 * Thus, anonymous pages related with file-mapped areas can show
+		 * sharing patterns which can be exploited in LKSM while other
+		 * anonymous regions (e.g., heap) don't.
+		 * LKSM only tracks file-related regions to make filters.
+		 */
+		if (!is_heap(vma) && !is_stack(vma) &&
+				!is_exec(vma) && vma->anon_vma)
+			lksm_register_file_anon_region(slot, vma);
+#endif
 	}
 
 	return newly_allocated;
@@ -836,6 +1013,69 @@ static int ksm_join(struct mm_struct *mm, int frozen)
 	ret = ksm_join(mm, frozen);	\
 	up_write(&mm->mmap_sem);	\
 } while (0)
+
+#ifdef CONFIG_LKSM_FILTER
+static void lksm_region_ref_append
+(struct mm_slot *slot, struct lksm_region *region)
+{
+	struct lksm_region_ref *ref;
+
+	BUG_ON(!region);
+	ref = kzalloc(sizeof(struct lksm_region_ref), GFP_KERNEL);
+	if (!ref)
+		return;
+	ref->region = region;
+	list_add_tail(&ref->list, &slot->ref_list);
+
+	atomic_inc(&region->refcount);
+}
+
+static void lksm_region_free(struct lksm_region *region)
+{
+	unsigned long flags;
+
+	ksm_debug("lets free region(%p) prev(%p)", region, region->prev);
+	spin_lock_irqsave(&lksm_region_lock, flags);
+	if (!region->next) {
+		if (region->prev) {
+			if (atomic_read(&region->prev->refcount) == 0) {
+				hash_del(&region->prev->hnode);
+				if (region->prev->len > SINGLE_FILTER_LEN)
+					kfree(region->prev->filter);
+				kfree(region->prev);
+			} else {
+				ksm_debug("prev region(%p) has ref count(%d)",
+						region->prev,
+						atomic_read(&region->prev->refcount));
+				region->prev->next = NULL;
+			}
+		}
+		hash_del(&region->hnode);
+		if (region->len > SINGLE_FILTER_LEN)
+			kfree(region->filter);
+		kfree(region);
+	}
+	spin_unlock_irqrestore(&lksm_region_lock, flags);
+}
+
+static void lksm_region_ref_remove(struct lksm_region_ref *ref)
+{
+	list_del_init(&ref->list);
+	if (atomic_dec_and_test(&ref->region->refcount))
+		lksm_region_free(ref->region);
+	kfree(ref);
+}
+
+static void lksm_region_ref_list_release(struct mm_slot *slot)
+{
+	struct lksm_region_ref *ref, *next;
+
+	ksm_debug("release %p ref list", slot);
+	list_for_each_entry_safe(ref, next, &slot->ref_list, list) {
+		lksm_region_ref_remove(ref);
+	}
+}
+#endif /* CONFIG_LKSM_FILTER */
 
 /*
  * This helper is used for getting right index into array of tree roots.
@@ -1559,6 +1799,10 @@ static int try_to_merge_with_ksm_page(struct rmap_item *rmap_item,
 	/* Unstable nid is in union with stable anon_vma: remove first */
 	remove_rmap_item_from_tree(rmap_item);
 
+#ifdef CONFIG_LKSM_FILTER
+	/* node is removed from tree, base_addr can be safely used */
+	rmap_item->base_addr = vma->vm_start;
+#endif
 	/* Must get reference to anon_vma while still holding mmap_sem */
 	rmap_item->anon_vma = vma->anon_vma;
 	get_anon_vma(vma->anon_vma);
@@ -2249,6 +2493,9 @@ struct rmap_item *unstable_tree_search_insert(struct rmap_item *rmap_item,
 	rb_link_node(&rmap_item->node, parent, new);
 	rb_insert_color(&rmap_item->node, root);
 
+#ifdef CONFIG_LKSM_FILTER
+	rmap_item->region = ksm_scan.region;
+#endif
 	ksm_pages_unshared++;
 	return NULL;
 }
@@ -2291,6 +2538,40 @@ static void stable_tree_append(struct rmap_item *rmap_item,
 	} else
 		ksm_pages_shared++;
 }
+
+#ifdef CONFIG_LKSM_FILTER
+static inline void stable_tree_append_region(struct rmap_item *rmap_item,
+			       struct stable_node *stable_node,
+			       struct lksm_region *region,
+			       bool max_page_sharing_bypass)
+{
+	if (region->type == LKSM_REGION_FILE1
+			|| region->type == LKSM_REGION_FILE2) {
+		int ret;
+		unsigned long offset =
+				(rmap_item->address - rmap_item->base_addr) >> PAGE_SHIFT;
+		if (unlikely(region->filter_cnt == 0)
+				&& region->len > SINGLE_FILTER_LEN
+				&& !region->filter) {
+			region->filter = kcalloc(region->len, sizeof(long), GFP_KERNEL);
+			if (!region->filter) {
+				ksm_err("fail to allocate memory for filter");
+				goto skip;
+			}
+		}
+		if (region->len > SINGLE_FILTER_LEN)
+			ret = test_and_set_bit(offset, region->filter);
+		else
+			ret = test_and_set_bit(offset, &region->single_filter);
+		if (!ret)
+			region->filter_cnt++;
+	}
+	region->merge_cnt++;
+	region_share[region->type]++;
+skip:
+	stable_tree_append(rmap_item, stable_node, max_page_sharing_bypass);
+}
+#endif /* CONFIG_LKSM_FILTER */
 
 /*
  * cmp_and_merge_page - first see if page can be merged into the stable tree;
@@ -2352,8 +2633,13 @@ static void cmp_and_merge_page(struct page *page, struct rmap_item *rmap_item)
 			 * add its rmap_item to the stable tree.
 			 */
 			lock_page(kpage);
+#ifdef CONFIG_LKSM_FILTER
+			stable_tree_append_region(rmap_item, page_stable_node(kpage),
+					ksm_scan.region, max_page_sharing_bypass);
+#else
 			stable_tree_append(rmap_item, page_stable_node(kpage),
 					   max_page_sharing_bypass);
+#endif
 			unlock_page(kpage);
 		}
 		put_page(kpage);
@@ -2406,7 +2692,9 @@ static void cmp_and_merge_page(struct page *page, struct rmap_item *rmap_item)
 		unstable_tree_search_insert(rmap_item, page, &tree_page);
 	if (tree_rmap_item) {
 		bool split;
-
+#ifdef CONFIG_LKSM_FILTER
+		struct lksm_region *tree_region = tree_rmap_item->region;
+#endif
 		kpage = try_to_merge_two_pages(rmap_item, page,
 						tree_rmap_item, tree_page);
 		/*
@@ -2430,10 +2718,17 @@ static void cmp_and_merge_page(struct page *page, struct rmap_item *rmap_item)
 			lock_page(kpage);
 			stable_node = stable_tree_insert(kpage);
 			if (stable_node) {
+#ifdef CONFIG_LKSM_FILTER
+				stable_tree_append_region(tree_rmap_item, stable_node,
+						tree_region, false);
+				stable_tree_append_region(rmap_item, stable_node,
+						ksm_scan.region, false);
+#else
 				stable_tree_append(tree_rmap_item, stable_node,
 						   false);
 				stable_tree_append(rmap_item, stable_node,
 						   false);
+#endif
 			}
 			unlock_page(kpage);
 
@@ -2446,6 +2741,10 @@ static void cmp_and_merge_page(struct page *page, struct rmap_item *rmap_item)
 			if (!stable_node) {
 				break_cow(tree_rmap_item);
 				break_cow(rmap_item);
+#ifdef CONFIG_LKSM_FILTER
+				tree_rmap_item->region = tree_region;
+				rmap_item->region = ksm_scan.region;
+#endif
 			}
 		} else if (split) {
 			/*
@@ -2494,6 +2793,9 @@ static struct rmap_item *get_next_rmap_item(struct mm_slot *mm_slot,
 		rmap_item->mm = mm_slot->mm;
 		rmap_item->address = addr;
 		rmap_item->rmap_list = *rmap_list;
+#ifdef CONFIG_LKSM_FILTER
+		rmap_item->region = ksm_scan.region;
+#endif
 		*rmap_list = rmap_item;
 		if (lksm_test_mm_state(mm_slot, FROZEN_BIT))
 			lksm_set_rmap_frozen(rmap_item);
@@ -2530,6 +2832,9 @@ static void lksm_flush_removed_mm_list(void)
 			cond_resched();
 
 			remove_trailing_rmap_items(slot, &slot->rmap_list);
+#ifdef CONFIG_LKSM_FILTER
+			lksm_region_ref_list_release(slot);
+#endif
 			clear_bit(MMF_VM_MERGEABLE, &slot->mm->flags);
 			mmdrop(slot->mm);
 			free_mm_slot(slot);
@@ -2610,6 +2915,199 @@ static void lksm_insert_mm_slot_ordered(struct mm_slot *slot)
 	rb_insert_color(&slot->ordered_list, root);
 }
 
+#ifdef CONFIG_LKSM_FILTER
+/*
+ * most vmas grow up except stack.
+ * the given value of size must be same with orig's one.
+ */
+
+static inline void __lksm_copy_filter
+(unsigned long *orig, unsigned long *newer, int size)
+{
+	while (size-- >= 0)
+		*(newer++) = *(orig++);
+}
+
+static inline void lksm_copy_filter
+(struct lksm_region *region, unsigned long *filter)
+{
+	if (region->len > SINGLE_FILTER_LEN) {
+		if (region->filter)
+			__lksm_copy_filter(region->filter, filter, region->len);
+	} else
+		__lksm_copy_filter(&region->single_filter, filter, region->len);
+}
+
+static struct vm_area_struct *lksm_find_next_vma
+(struct mm_struct *mm, struct mm_slot *slot)
+{
+	struct vm_area_struct *vma;
+	struct lksm_region *region;
+
+	if (ksm_test_exit(mm))
+		vma = NULL;
+	else
+		vma = find_vma(mm, ksm_scan.address);
+	for (; vma; vma = vma->vm_next) {
+		if (!(vma->vm_flags & VM_MERGEABLE))
+			continue;
+		if (ksm_scan.address < vma->vm_start)
+			ksm_scan.address = vma->vm_start;
+		if (!vma->anon_vma) {
+			ksm_scan.address = vma->vm_end;
+			continue;
+		}
+
+		if (ksm_scan.cached_vma == vma)
+			region = ksm_scan.region;
+		else {
+			region = lksm_find_region(vma);
+			ksm_scan.cached_vma = vma;
+			ksm_scan.vma_base_addr = vma->vm_start;
+		}
+
+		if (!region || region->type == LKSM_REGION_CONFLICT)
+			region = &unknown_region;
+		else if (region->type != LKSM_REGION_HEAP
+					&& region->type != LKSM_REGION_CONFLICT
+					&& region->type != LKSM_REGION_UNKNOWN) {
+			int size = lksm_region_size(vma->vm_start, vma->vm_end);
+			int len = (size > BITS_PER_LONG) ? lksm_bitmap_size(size)
+					: SINGLE_FILTER_LEN;
+
+			if (len > SINGLE_FILTER_LEN && unlikely(region->len != len)) {
+				region->conflict++;
+				if (region->conflict > 1) {
+					region->type = LKSM_REGION_CONFLICT;
+					if (region->len > SINGLE_FILTER_LEN)
+						kfree(region->filter);
+					region->filter = NULL;
+					region->len = SINGLE_FILTER_LEN;
+					/* conflicted regions will be unfiltered */
+					region = &unknown_region;
+					ksm_debug("the region is frequently conflicted. break.");
+					break;
+				}
+				if (region->len < len) {
+					unsigned long *filter;
+					ksm_debug("size of region(%p) is changed: %d -> %d (size: %d)",
+							region, region->len, len, size);
+					ksm_debug("region-%d type: %d vma:%p", region->ino, region->type, vma);
+					filter = kcalloc(len, sizeof(long), GFP_KERNEL);
+					if (!filter) {
+						ksm_err("fail to allocate memory for filter");
+						goto skip;
+					}
+					if (region->filter_cnt > 0)
+						lksm_copy_filter(region, filter);
+					if (region->len > SINGLE_FILTER_LEN)
+						kfree(region->filter);
+					region->filter = filter;
+					region->len = len;
+				}
+			}
+		}
+skip:
+		if (ksm_scan.region != region)
+			ksm_scan.region = region;
+		break;
+	}
+	return vma;
+}
+
+static inline unsigned long lksm_get_next_filtered_address
+(struct lksm_region *region, unsigned long addr, unsigned long base)
+{
+	unsigned long next_offset, curr_offset, nbits;
+
+	curr_offset = (addr - base) >> PAGE_SHIFT;
+	nbits = (region->len == 0) ? BITS_PER_LONG :
+				(region->len << (6 + PAGE_SHIFT));
+	if (region->len > SINGLE_FILTER_LEN)
+		next_offset = find_next_bit(region->filter, nbits, curr_offset);
+	else
+		next_offset = find_next_bit(&region->single_filter,
+				nbits, curr_offset);
+
+	return (next_offset << PAGE_SHIFT) + base;
+}
+
+#define lksm_region_skipped(region) \
+		(region->len > 0 && !region->filter)
+
+static struct rmap_item *__scan_next_rmap_item(struct page **page,
+		struct mm_struct *mm, struct mm_slot *slot)
+{
+	struct vm_area_struct *vma;
+	struct rmap_item *rmap_item;
+	unsigned long addr;
+
+again:
+	cond_resched();
+	vma = lksm_find_next_vma(mm, slot);
+
+	while (vma && ksm_scan.address < vma->vm_end) {
+		if (ksm_test_exit(mm)) {
+			vma = NULL;
+			break;
+		}
+		if (!lksm_test_mm_state(slot, KSM_MM_NEWCOMER)
+				&& !lksm_test_mm_state(slot, KSM_MM_FROZEN)
+				&& ksm_scan.region->type != LKSM_REGION_HEAP
+				&& ksm_scan.region->type != LKSM_REGION_UNKNOWN
+				&& lksm_region_mature(ksm_scan.scan_round, ksm_scan.region)
+				&& !lksm_region_skipped(ksm_scan.region)) {
+			if (ksm_scan.region->filter_cnt > 0) {
+				addr = lksm_get_next_filtered_address(ksm_scan.region,
+						ksm_scan.address, ksm_scan.vma_base_addr);
+				ksm_scan.address = addr;
+				if (ksm_scan.address >= vma->vm_end)
+					break;
+				if (ksm_scan.address < vma->vm_start) {
+					ksm_debug("address(%lu) is less than vm_start(%lu)",
+						ksm_scan.address, vma->vm_start);
+					break;
+				}
+			} else {
+				ksm_scan.address = vma->vm_end;
+				break;
+			}
+		}
+		*page = follow_page(vma, ksm_scan.address, FOLL_GET);
+		if (IS_ERR_OR_NULL(*page)) {
+			ksm_scan.address += PAGE_SIZE;
+			cond_resched();
+			continue;
+		}
+		if (PageAnon(*page)) {
+			flush_anon_page(vma, *page, ksm_scan.address);
+			flush_dcache_page(*page);
+			rmap_item = get_next_rmap_item(slot,
+					ksm_scan.rmap_list, ksm_scan.address);
+			if (rmap_item) {
+				ksm_scan.rmap_list =
+						&rmap_item->rmap_list;
+				ksm_scan.address += PAGE_SIZE;
+			} else
+				put_page(*page);
+			return rmap_item;
+		}
+		put_page(*page);
+		ksm_scan.address += PAGE_SIZE;
+		cond_resched();
+	}
+	if (vma)
+		goto again;
+	/* clean-up a scanned region */
+	ksm_scan.region = NULL;
+	ksm_scan.cached_vma = NULL;
+	ksm_scan.vma_base_addr = 0;
+
+	return NULL; /* no scannable rmap item */
+}
+
+#else /* CONFIG_LKSM_FILTER */
+
 static struct rmap_item *__scan_next_rmap_item(struct page **page,
 		struct mm_struct *mm, struct mm_slot *slot)
 {
@@ -2659,6 +3157,8 @@ static struct rmap_item *__scan_next_rmap_item(struct page **page,
 
 	return NULL;
 }
+
+#endif /* CONFIG_LKSM_FILTER */
 
 static inline int sum_merge_win(int merge_win[], int len)
 {
@@ -3178,6 +3678,10 @@ static int lksm_prepare_partial_scan(void)
 				mm_slot->mm->owner->comm);
 		list_move_tail(&mm_slot->scan_list, &recheck_list);
 		lksm_clear_mm_state(mm_slot, KSM_MM_SCANNED);
+#ifdef CONFIG_LKSM_FILTER
+		/* to prevent mm_slot termination on __ksm_exit */
+		lksm_set_mm_state(mm_slot, KSM_MM_PREPARED);
+#endif
 		nr_scannable++;
 
 next_node:
@@ -3187,11 +3691,26 @@ next_node:
 		mm_slot = rb_entry(node, struct mm_slot, ordered_list);
 	}
 	spin_unlock(&ksm_mmlist_lock);
-
+#ifdef CONFIG_LKSM_FILTER
+	list_for_each_entry(mm_slot, &recheck_list, scan_list) {
+		if (ksm_test_exit(mm_slot->mm))
+			continue;
+		mm_slot->nr_scans = 0;
+		/* check new maps */
+		down_read(&mm_slot->mm->mmap_sem);
+		ksm_join(mm_slot->mm, KSM_TASK_UNFROZEN);
+		up_read(&mm_slot->mm->mmap_sem);
+	}
+#endif
 skip_vips:
 	spin_lock(&ksm_mmlist_lock);
-	if (!list_empty(&recheck_list))
+	if (!list_empty(&recheck_list)) {
+#ifdef CONFIG_LKSM_FILTER
+        list_for_each_entry(mm_slot, &recheck_list, scan_list)
+            lksm_clear_mm_state(mm_slot, KSM_MM_PREPARED);
+#endif
 		list_splice(&recheck_list, &ksm_scan_head.scan_list);
+	}
 	spin_unlock(&ksm_mmlist_lock);
 
 	ksm_scan.scan_mode = LKSM_SCAN_PARTIAL;
@@ -3500,6 +4019,9 @@ static struct mm_slot *__ksm_enter_alloc_slot(struct mm_struct *mm, int frozen)
 	}
 	ksm_nr_added_process++;
 	spin_unlock(&ksm_mmlist_lock);
+#ifdef CONFIG_LKSM_FILTER
+	INIT_LIST_HEAD(&mm_slot->ref_list);
+#endif
 	set_bit(MMF_VM_MERGEABLE, &mm->flags);
 	atomic_inc(&mm->mm_count);
 
@@ -3535,6 +4057,10 @@ void __ksm_exit(struct mm_struct *mm)
 	}
 
 	if (ksm_scan.mm_slot != mm_slot) {
+#ifdef CONFIG_LKSM_FILTER
+		if (lksm_test_mm_state(mm_slot, KSM_MM_PREPARED))
+			goto deferring_free;
+#endif
 		if (!mm_slot->rmap_list) {
 			hash_del(&mm_slot->link);
 			list_del(&mm_slot->mm_list);
@@ -3554,10 +4080,16 @@ void __ksm_exit(struct mm_struct *mm)
 			ksm_debug("nr_scannable: %d", atomic_read(&ksm_scan.nr_scannable));
 		}
 	}
+#ifdef CONFIG_LKSM_FILTER
+deferring_free:
+#endif
 	ksm_nr_added_process--;
 	spin_unlock(&ksm_mmlist_lock);
 
 	if (easy_to_free) {
+#ifdef CONFIG_LKSM_FILTER
+		lksm_region_ref_list_release(mm_slot);
+#endif
 		free_mm_slot(mm_slot);
 		clear_bit(MMF_VM_MERGEABLE, &mm->flags);
 		mmdrop(mm);
@@ -4240,6 +4772,25 @@ static ssize_t scan_boost_store(struct kobject *kbj,
 }
 KSM_ATTR(scan_boost);
 
+#ifdef CONFIG_LKSM_FILTER
+static ssize_t nr_regions_show(struct kobject *kobj,
+				 struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", lksm_nr_regions);
+}
+KSM_ATTR_RO(nr_regions);
+
+static ssize_t region_share_show(struct kobject *obj,
+				struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%s:%d %s:%d %s:%d %s:%d %s:%d\n",
+			region_type_str[0], region_share[0], region_type_str[1], region_share[1],
+			region_type_str[2], region_share[2], region_type_str[3], region_share[3],
+			region_type_str[4], region_share[4]);
+}
+KSM_ATTR_RO(region_share);
+#endif /* CONFIG_LKSM_FILTER */
+
 static struct attribute *ksm_attrs[] = {
 	&sleep_millisecs_attr.attr,
 	&pages_to_scan_attr.attr,
@@ -4261,6 +4812,10 @@ static struct attribute *ksm_attrs[] = {
 	&full_scan_interval_attr.attr,
 	&one_shot_scanning_attr.attr,
 	&scan_boost_attr.attr,
+#ifdef CONFIG_LKSM_FILTER
+	&nr_regions_attr.attr,
+	&region_share_attr.attr,
+#endif
 	NULL,
 };
 
@@ -4269,6 +4824,220 @@ static const struct attribute_group ksm_attr_group = {
 	.name = "ksm",
 };
 #endif /* CONFIG_SYSFS */
+
+#ifdef CONFIG_LKSM_FILTER
+static inline void init_lksm_region
+(struct lksm_region *region, unsigned long ino, int type, int len)
+{
+	region->ino = ino;
+	region->type = type;
+	region->len = len;
+}
+
+/* if region is newly allocated, the function returns true. */
+static void lksm_insert_region
+(struct lksm_region **region, unsigned long ino,
+struct vm_area_struct *vma, int type)
+{
+	int size, len, need_hash_add = 0;
+	struct lksm_region *next = NULL;
+	unsigned long flags;
+
+	size = lksm_region_size(vma->vm_start, vma->vm_end);
+	BUG_ON(size < 0);
+	len = (size > BITS_PER_LONG) ? lksm_bitmap_size(size) : SINGLE_FILTER_LEN;
+
+	if (!(*region)) {
+		*region = kzalloc(sizeof(struct lksm_region), GFP_KERNEL);
+		if (!*region) {
+			ksm_err("region allocation failed");
+			return;
+		}
+		init_lksm_region(*region, ino, LKSM_REGION_FILE1, len);
+		(*region)->scan_round = ksm_crawl_round;
+		atomic_set(&(*region)->refcount, 0);
+		lksm_nr_regions++;
+		need_hash_add = 1;
+	}
+
+	if (!(*region)->next && type == LKSM_REGION_FILE2) {
+		next = kzalloc(sizeof(struct lksm_region), GFP_KERNEL);
+		if (!next) {
+			if (need_hash_add)
+				kfree(*region);
+			*region = NULL;
+			ksm_err("region allocation failed");
+			return;
+		}
+		init_lksm_region(next, ino, LKSM_REGION_FILE2, len);
+		atomic_set(&next->refcount, 0);
+		next->scan_round = ksm_crawl_round;
+		lksm_nr_regions++;
+	}
+
+	if (need_hash_add || next) {
+		spin_lock_irqsave(&lksm_region_lock, flags);
+		if (need_hash_add)
+			hash_add(lksm_region_hash, &(*region)->hnode, ino);
+		if (next) {
+			(*region)->next = next;
+			next->prev = *region;
+		}
+		spin_unlock_irqrestore(&lksm_region_lock, flags);
+	}
+}
+
+static inline struct lksm_region *lksm_hash_find_region(unsigned long ino)
+{
+	struct lksm_region *region;
+
+	hash_for_each_possible(lksm_region_hash, region, hnode, ino)
+		if (region->ino == ino)
+			return region;
+	return NULL;
+}
+
+static void lksm_register_file_anon_region
+(struct mm_slot *slot, struct vm_area_struct *vma)
+{
+	struct lksm_region *region;
+	struct file *file = NULL;
+	struct inode *inode;
+	unsigned long flags;
+	int type;
+
+	if (vma->vm_file) {
+		file = vma->vm_file;
+		type = LKSM_REGION_FILE1;
+	} else if (vma->vm_prev) {
+		/* LKSM should deal with .NET libraries */
+		struct vm_area_struct *prev = vma->vm_prev;
+		if (prev->vm_flags & VM_MERGEABLE && prev->vm_file) {
+			/* Linux standard map structure */
+			file = prev->vm_file;
+			type = LKSM_REGION_FILE2;
+		} else {
+			/* DLL map structure */
+			int i = 0;
+			bool find = false;
+			while (i <= LKSM_REGION_ITER_MAX && prev) {
+				if (file == NULL)
+					file = prev->vm_file;
+				else if (prev->vm_file && file != prev->vm_file)
+					break;
+
+				if (prev->vm_flags & VM_MERGEABLE && file) {
+					find = true;
+					break;
+				}
+				prev = prev->vm_prev;
+				i++;
+			}
+			if (find)
+				type = LKSM_REGION_FILE2;
+			else
+				file = NULL;
+		}
+	}
+
+	if (file) {
+		inode = file_inode(file);
+		BUG_ON(!inode);
+
+		spin_lock_irqsave(&lksm_region_lock, flags);
+		region = lksm_hash_find_region(inode->i_ino);
+		spin_unlock_irqrestore(&lksm_region_lock, flags);
+
+		lksm_insert_region(&region, inode->i_ino, vma, type);
+		if (region) {
+			if (type == LKSM_REGION_FILE1)
+				lksm_region_ref_append(slot, region);
+			else
+				lksm_region_ref_append(slot, region->next);
+		}
+	}
+}
+
+static struct lksm_region *lksm_find_region(struct vm_area_struct *vma)
+{
+	struct lksm_region *region = NULL;
+	struct file *file = NULL;
+	struct inode *inode;
+	unsigned long ino = 0, flags;
+	int type;
+
+	if (is_heap(vma))
+		return &heap_region;
+	else if (is_stack(vma))
+		return NULL;
+	else if (!vma->anon_vma)
+		return NULL;
+	else if (is_exec(vma))
+		return NULL;
+
+	if (vma->vm_file) {
+		/* check thread stack */
+		file = vma->vm_file;
+		type = LKSM_REGION_FILE1;
+	} else if (vma->vm_prev) {
+		struct vm_area_struct *prev = vma->vm_prev;
+		if (prev->vm_flags & VM_MERGEABLE && prev->vm_file) {
+			/* Linux standard map structure */
+			file = prev->vm_file;
+			type = LKSM_REGION_FILE2;
+		} else {
+			/* DLL map structure */
+			int i = 0;
+			bool find = false;
+			while (i <= LKSM_REGION_ITER_MAX && prev) {
+				if (file == NULL)
+					file = prev->vm_file;
+				else if (prev->vm_file && file != prev->vm_file)
+					break;
+
+				if (prev->vm_flags & VM_MERGEABLE && file) {
+					find = true;
+					break;
+				}
+				prev = prev->vm_prev;
+				i++;
+			}
+			if (find)
+				type = LKSM_REGION_FILE2;
+			else
+				file = NULL;
+		}
+	}
+
+	if (file) {
+		inode = file_inode(file);
+		BUG_ON(!inode);
+		ino = inode->i_ino;
+
+		if (ksm_scan.region && ksm_scan.region->ino == ino) {
+			if (ksm_scan.region->type == type)
+				return ksm_scan.region;
+			else if (ksm_scan.region->type == LKSM_REGION_FILE1)
+				region = ksm_scan.region;
+		} else {
+			spin_lock_irqsave(&lksm_region_lock, flags);
+			region = lksm_hash_find_region(ino);
+			spin_unlock_irqrestore(&lksm_region_lock, flags);
+		}
+	}
+
+	if (region && type == LKSM_REGION_FILE2) {
+		if (!region->next) {
+			ksm_debug("region(%p:%lu:%s)-vma(%p) doesn't have next area (file: %p)",
+					region, ino, region_type_str[region->type], vma, file);
+			lksm_insert_region(&region, ino, vma, type);
+			BUG_ON(!region->next);
+		}
+		return region->next;
+	}
+	return region;
+}
+#endif /* CONFIG_LKSM_FILTER */
 
 static inline int __lksm_remove_candidate(struct task_struct *task)
 {
@@ -4310,6 +5079,7 @@ void lksm_remove_candidate(struct mm_struct *mm)
 		ksm_debug("proc-%d(%s) will be removed",
 				task_pid_nr(mm->owner), mm->owner->comm);
 
+	ksm_debug("proc-%d(%s) is exited", task_pid_nr(mm->owner), mm->owner->comm);
 	spin_lock(&frozen_task_lock);
 	ret = __lksm_remove_candidate(mm->owner);
 	spin_unlock(&frozen_task_lock);
@@ -4454,6 +5224,19 @@ static void __init lksm_init(void)
 	INIT_LIST_HEAD(&ksm_scan.remove_mm_list);
 
 	crawler_sleep = msecs_to_jiffies(1000);
+#ifdef CONFIG_LKSM_FILTER
+	init_lksm_region(&heap_region, 0, LKSM_REGION_HEAP, 0);
+	heap_region.merge_cnt = 0;
+	heap_region.filter_cnt = 0;
+	heap_region.filter = NULL;
+
+	init_lksm_region(&unknown_region, 0, LKSM_REGION_UNKNOWN, 0);
+	unknown_region.merge_cnt = 0;
+	unknown_region.filter_cnt = 0;
+	unknown_region.filter = NULL;
+
+	spin_lock_init(&lksm_region_lock);
+#endif /* CONFIG_LKSM_FILTER */
 	wake_up_process(ksm_crawld);
 }
 
