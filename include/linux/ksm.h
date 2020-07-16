@@ -21,13 +21,28 @@ struct mem_cgroup;
 #ifdef CONFIG_KSM
 int ksm_madvise(struct vm_area_struct *vma, unsigned long start,
 		unsigned long end, int advice, unsigned long *vm_flags);
-int __ksm_enter(struct mm_struct *mm);
 void __ksm_exit(struct mm_struct *mm);
+
+#ifdef CONFIG_LKSM
+int __ksm_enter(struct mm_struct *mm, int frozen);
+void lksm_remove_candidate(struct mm_struct *mm);
+int lksm_hint(struct task_struct *task, int frozen);
+
+#define KSM_TASK_UNFROZEN 0
+#define KSM_TASK_FROZEN 1
+#define KSM_TASK_THAWED 2
+#else /* CONFIG_LKSM */
+int __ksm_enter(struct mm_struct *mm);
+#endif /* CONFIG_LKSM */
 
 static inline int ksm_fork(struct mm_struct *mm, struct mm_struct *oldmm)
 {
 	if (test_bit(MMF_VM_MERGEABLE, &oldmm->flags))
+#ifdef CONFIG_LKSM
+		return lksm_hint(mm->owner, KSM_TASK_UNFROZEN);
+#else /* CONFIG_LKSM */
 		return __ksm_enter(mm);
+#endif /* CONFIG_LKSM */
 	return 0;
 }
 
@@ -35,6 +50,10 @@ static inline void ksm_exit(struct mm_struct *mm)
 {
 	if (test_bit(MMF_VM_MERGEABLE, &mm->flags))
 		__ksm_exit(mm);
+#ifdef CONFIG_LKSM
+	else
+		lksm_remove_candidate(mm);
+#endif
 }
 
 /*

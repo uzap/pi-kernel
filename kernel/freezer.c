@@ -12,6 +12,10 @@
 #include <linux/freezer.h>
 #include <linux/kthread.h>
 
+#ifdef CONFIG_LKSM
+#include <linux/ksm.h>
+#endif
+
 /* total number of freezing conditions in effect */
 atomic_t system_freezing_cnt = ATOMIC_INIT(0);
 EXPORT_SYMBOL(system_freezing_cnt);
@@ -140,6 +144,10 @@ bool freeze_task(struct task_struct *p)
 		wake_up_state(p, TASK_INTERRUPTIBLE);
 
 	spin_unlock_irqrestore(&freezer_lock, flags);
+#ifdef CONFIG_LKSM
+	if (!(p->flags & PF_KTHREAD))
+		lksm_hint(p, KSM_TASK_FROZEN);
+#endif
 	return true;
 }
 
@@ -151,6 +159,10 @@ void __thaw_task(struct task_struct *p)
 	if (frozen(p))
 		wake_up_process(p);
 	spin_unlock_irqrestore(&freezer_lock, flags);
+#ifdef CONFIG_LKSM
+	if (!(p->flags & PF_KTHREAD))
+		lksm_hint(p, KSM_TASK_THAWED);
+#endif
 }
 
 /**
