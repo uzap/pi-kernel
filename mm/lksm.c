@@ -1034,7 +1034,6 @@ static void lksm_region_free(struct lksm_region *region)
 {
 	unsigned long flags;
 
-	ksm_debug("lets free region(%p) prev(%p)", region, region->prev);
 	spin_lock_irqsave(&lksm_region_lock, flags);
 	if (!region->next) {
 		if (region->prev) {
@@ -1043,12 +1042,8 @@ static void lksm_region_free(struct lksm_region *region)
 				if (region->prev->len > SINGLE_FILTER_LEN)
 					kfree(region->prev->filter);
 				kfree(region->prev);
-			} else {
-				ksm_debug("prev region(%p) has ref count(%d)",
-						region->prev,
-						atomic_read(&region->prev->refcount));
+			} else
 				region->prev->next = NULL;
-			}
 		}
 		hash_del(&region->hnode);
 		if (region->len > SINGLE_FILTER_LEN)
@@ -1070,7 +1065,6 @@ static void lksm_region_ref_list_release(struct mm_slot *slot)
 {
 	struct lksm_region_ref *ref, *next;
 
-	ksm_debug("release %p ref list", slot);
 	list_for_each_entry_safe(ref, next, &slot->ref_list, list) {
 		lksm_region_ref_remove(ref);
 	}
@@ -2826,7 +2820,6 @@ static void lksm_flush_removed_mm_list(void)
 
 	if (!list_empty(&head->mm_list)) {
 		list_for_each_entry_safe(slot, next, &head->mm_list, mm_list) {
-			ksm_debug("slot(%p) will be freed", slot);
 			list_del(&slot->mm_list);
 
 			cond_resched();
@@ -2840,8 +2833,6 @@ static void lksm_flush_removed_mm_list(void)
 			free_mm_slot(slot);
 		}
 	}
-
-	ksm_debug("slot(%p) will be freed", head);
 
 	cond_resched();
 	remove_trailing_rmap_items(head, &head->rmap_list);
@@ -2873,7 +2864,6 @@ static struct mm_slot *lksm_get_unscanned_mm_slot(struct mm_slot *slot)
 	list_for_each_entry_safe_continue(slot, next, &ksm_scan_head.scan_list,
 			scan_list) {
 		if (ksm_test_exit(slot->mm)) {
-			ksm_debug("slot:%p %p is moved to remove list", slot, slot->mm);
 			if (lksm_test_mm_state(slot, KSM_MM_FROZEN))
 				atomic_dec(&ksm_scan.nr_frozen);
 			else
@@ -2985,14 +2975,12 @@ static struct vm_area_struct *lksm_find_next_vma
 					region->len = SINGLE_FILTER_LEN;
 					/* conflicted regions will be unfiltered */
 					region = &unknown_region;
-					ksm_debug("the region is frequently conflicted. break.");
 					break;
 				}
 				if (region->len < len) {
 					unsigned long *filter;
 					ksm_debug("size of region(%p) is changed: %d -> %d (size: %d)",
 							region, region->len, len, size);
-					ksm_debug("region-%d type: %d vma:%p", region->ino, region->type, vma);
 					filter = kcalloc(len, sizeof(long), GFP_KERNEL);
 					if (!filter) {
 						ksm_err("fail to allocate memory for filter");
@@ -4072,13 +4060,10 @@ void __ksm_exit(struct mm_struct *mm)
 			easy_to_free = 1;
 		} else
 			lksm_remove_mm_slot(mm_slot);
-		if (lksm_test_mm_state(mm_slot, KSM_MM_FROZEN)) {
+		if (lksm_test_mm_state(mm_slot, KSM_MM_FROZEN))
 			atomic_dec(&ksm_scan.nr_frozen);
-			ksm_debug("nr_frozen: %d", atomic_read(&ksm_scan.nr_frozen));
-		} else if (!lksm_test_mm_state(mm_slot, KSM_MM_SCANNED)) {
+		else if (!lksm_test_mm_state(mm_slot, KSM_MM_SCANNED))
 			atomic_dec(&ksm_scan.nr_scannable);
-			ksm_debug("nr_scannable: %d", atomic_read(&ksm_scan.nr_scannable));
-		}
 	}
 #ifdef CONFIG_LKSM_FILTER
 deferring_free:
@@ -5028,8 +5013,6 @@ static struct lksm_region *lksm_find_region(struct vm_area_struct *vma)
 
 	if (region && type == LKSM_REGION_FILE2) {
 		if (!region->next) {
-			ksm_debug("region(%p:%lu:%s)-vma(%p) doesn't have next area (file: %p)",
-					region, ino, region_type_str[region->type], vma, file);
 			lksm_insert_region(&region, ino, vma, type);
 			BUG_ON(!region->next);
 		}
@@ -5069,17 +5052,11 @@ void lksm_remove_candidate(struct mm_struct *mm)
 				atomic_dec(&ksm_scan.nr_frozen);
 			else if (!lksm_test_mm_state(mm_slot, KSM_MM_SCANNED))
 				atomic_dec(&ksm_scan.nr_scannable);
-			ksm_debug("mm_slot: %p will be exited", mm_slot);
 		}
 		spin_unlock(&ksm_mmlist_lock);
 		return;
 	}
 
-	if (!ksm_test_exit(mm))
-		ksm_debug("proc-%d(%s) will be removed",
-				task_pid_nr(mm->owner), mm->owner->comm);
-
-	ksm_debug("proc-%d(%s) is exited", task_pid_nr(mm->owner), mm->owner->comm);
 	spin_lock(&frozen_task_lock);
 	ret = __lksm_remove_candidate(mm->owner);
 	spin_unlock(&frozen_task_lock);
