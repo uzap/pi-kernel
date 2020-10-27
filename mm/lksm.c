@@ -2836,6 +2836,9 @@ static void lksm_flush_removed_mm_list(void)
 
 	cond_resched();
 	remove_trailing_rmap_items(head, &head->rmap_list);
+#ifdef CONFIG_LKSM_FILTER
+	lksm_region_ref_list_release(head);
+#endif
 	clear_bit(MMF_VM_MERGEABLE, &head->mm->flags);
 	mmdrop(head->mm);
 	free_mm_slot(head);
