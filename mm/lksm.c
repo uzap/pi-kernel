@@ -2914,7 +2914,7 @@ static void lksm_insert_mm_slot_ordered(struct mm_slot *slot)
 static inline void __lksm_copy_filter
 (unsigned long *orig, unsigned long *newer, int size)
 {
-	while (size-- >= 0)
+	while (--size >= 0)
 		*(newer++) = *(orig++);
 }
 
@@ -3009,8 +3009,8 @@ static inline unsigned long lksm_get_next_filtered_address
 	unsigned long next_offset, curr_offset, nbits;
 
 	curr_offset = (addr - base) >> PAGE_SHIFT;
-	nbits = (region->len == 0) ? BITS_PER_LONG :
-				(region->len << (6 + PAGE_SHIFT));
+	nbits = region->len * BITS_PER_LONG;
+
 	if (region->len > SINGLE_FILTER_LEN)
 		next_offset = find_next_bit(region->filter, nbits, curr_offset);
 	else
