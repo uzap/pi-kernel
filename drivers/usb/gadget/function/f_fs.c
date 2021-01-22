@@ -1073,7 +1073,8 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 
 		spin_unlock_irq(&epfile->ffs->eps_lock);
 
-		if (unlikely(wait_for_completion_interruptible(&done))) {
+		if (unlikely(wait_for_completion_interruptible(&done)) &&
+		    epfile->ep) {
 			/*
 			 * To avoid race condition with ffs_epfile_io_complete,
 			 * dequeue the request first then check
@@ -1083,6 +1084,12 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 			usb_ep_dequeue(ep->ep, req);
 			wait_for_completion(&done);
 			interrupted = ep->status < 0;
+		}
+
+		if (epfile->ep != ep) {
+			/* In the meantime, endpoint got disabled or changed. */
+			ret = -ESHUTDOWN;
+			goto error_mutex;
 		}
 
 		if (interrupted)
