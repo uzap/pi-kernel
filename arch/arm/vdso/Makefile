@@ -25,6 +25,8 @@ ldflags-y := -Bsymbolic --no-undefined -soname=linux-vdso.so.1 \
 obj-$(CONFIG_VDSO) += vdso.o
 CPPFLAGS_vdso.lds += -P -C -U$(ARCH)
 
+KBUILD_CFLAGS := $(filter-out $(CC_FLAGS_LTO),$(KBUILD_CFLAGS))
+
 CFLAGS_REMOVE_vdso.o = -pg
 
 # Force -O2 to avoid libgcc dependencies
