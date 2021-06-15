@@ -6194,19 +6194,29 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, int t
 	struct cpumask *cpus = this_cpu_cpumask_var_ptr(select_idle_mask);
 	struct sched_domain *this_sd;
 	u64 avg_cost, avg_idle;
-	u64 time;
+	struct rq *this_rq = this_rq();
+	u64 time = 0;
 	int this = smp_processor_id();
 	int cpu, nr = INT_MAX;
+	unsigned long now = jiffies;
 
 	this_sd = rcu_dereference(*this_cpu_ptr(&sd_llc));
 	if (!this_sd)
 		return -1;
 
 	/*
-	 * Due to large variance we need a large fuzz factor; hackbench in
-	 * particularly is sensitive here.
+	 * If we're busy, the assumption that the last idle period
+	 * predicts the future is flawed; age away the remaining
+	 * predicted idle time.
 	 */
-	avg_idle = this_rq()->avg_idle / 512;
+	if (unlikely(this_rq->wake_stamp < now)) {
+		while (this_rq->wake_stamp < now && this_rq->wake_avg_idle) {
+			this_rq->wake_stamp++;
+			this_rq->wake_avg_idle >>= 1;
+		}
+	}
+
+	avg_idle = this_rq->wake_avg_idle;
 	avg_cost = this_sd->avg_scan_cost + 1;
 
 	if (sched_feat(SIS_AVG_CPU) && avg_idle < avg_cost)
@@ -6232,6 +6242,13 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, int t
 	}
 
 	time = cpu_clock(this) - time;
+
+	/*
+	 * Account for the scan cost of wakeups against the average
+	 * idle time.
+	 */
+	this_rq->wake_avg_idle -= min(this_rq->wake_avg_idle, time);
+
 	update_avg(&this_sd->avg_scan_cost, time);
 
 	return cpu;
