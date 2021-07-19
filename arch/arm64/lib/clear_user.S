@@ -7,7 +7,7 @@
 #include <asm/assembler.h>
 
 	.text
-
+	.align 6
 /* Prototype: int __arch_clear_user(void *addr, size_t sz)
  * Purpose  : clear some user memory
  * Params   : addr - user memory address to clear
