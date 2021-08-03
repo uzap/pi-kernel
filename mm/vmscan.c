@@ -4023,16 +4023,14 @@ static int scan_pages(struct lruvec *lruvec, struct scan_control *sc, long *nr_t
 				isolated += delta;
 			}
 
-			if (scanned >= *nr_to_scan || isolated >= SWAP_CLUSTER_MAX ||
-			    ++batch_size == MAX_BATCH_SIZE)
+			if (isolated >= SWAP_CLUSTER_MAX || ++batch_size == MAX_BATCH_SIZE)
 				break;
 		}
 
 		list_splice(&moved, head);
 		__count_zid_vm_events(PGSCAN_SKIP, zone, skipped);
 
-		if (scanned >= *nr_to_scan || isolated >= SWAP_CLUSTER_MAX ||
-		    batch_size == MAX_BATCH_SIZE)
+		if (isolated >= SWAP_CLUSTER_MAX || batch_size == MAX_BATCH_SIZE)
 			break;
 	}
 
@@ -4056,7 +4054,7 @@ static int scan_pages(struct lruvec *lruvec, struct scan_control *sc, long *nr_t
 	 * may_unmap and may_writepage. The following check makes sure we won't
 	 * be stuck if we aren't making enough progress.
 	 */
-	return batch_size == MAX_BATCH_SIZE && sorted >= SWAP_CLUSTER_MAX ? 0 : -ENOENT;
+	return batch_size == MAX_BATCH_SIZE && sorted >= scanned / 2 ? 0 : -ENOENT;
 }
 
 static int get_tier_to_isolate(struct lruvec *lruvec, int type)
@@ -4240,12 +4238,12 @@ static int get_swappiness(struct lruvec *lruvec)
 static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, int swappiness)
 {
 	int gen, type, zone;
+	int nr_gens;
 	long nr_to_scan = 0;
 	struct lrugen *lrugen = &lruvec->evictable;
+	struct mem_cgroup *memcg = lruvec_memcg(lruvec);
 	DEFINE_MAX_SEQ();
 	DEFINE_MIN_SEQ();
-
-	lru_add_drain();
 
 	for (type = !swappiness; type < ANON_AND_FILE; type++) {
 		unsigned long seq;
@@ -4258,10 +4256,23 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, int s
 		}
 	}
 
-	nr_to_scan = max(nr_to_scan, 0L);
-	nr_to_scan = round_up(nr_to_scan >> sc->priority, SWAP_CLUSTER_MAX);
 
-	if (get_hi_wmark(max_seq, min_seq, swappiness) > MIN_NR_GENS)
+	if (nr_to_scan <= 0)
+		return 0;
+
+	nr_gens = get_hi_wmark(max_seq, min_seq, swappiness);
+
+	if (current_is_kswapd()) {
+		/* leave the work to age_lru_gens() */
+		if (nr_gens == MIN_NR_GENS)
+			return 0;
+
+		if (nr_to_scan >= sc->nr_to_reclaim)
+			sc->force_deactivate = 0;
+	}
+
+	nr_to_scan = max(nr_to_scan >> sc->priority, (long)!mem_cgroup_online(memcg));
+	if (!nr_to_scan || nr_gens > MIN_NR_GENS)
 		return nr_to_scan;
 
 	if (!arch_has_hw_pte_young()) {
@@ -4269,9 +4280,11 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, int s
 		return nr_to_scan;
 	}
 
-	/* kswapd uses lru_gen_age_node() */
-	if (current_is_kswapd())
+	/* move onto other memcgs if we haven't tried them all yet */
+	if (memcg && !sc->force_deactivate) {
+		sc->skipped_deactivate = 1;
 		return 0;
+	}
 
 	return walk_mm_list(lruvec, max_seq, sc, swappiness, NULL) ? nr_to_scan : 0;
 }
@@ -4282,6 +4295,8 @@ static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc
 	long scanned = 0;
 	struct mem_cgroup *memcg = lruvec_memcg(lruvec);
 
+	lru_add_drain();
+
 	blk_start_plug(&plug);
 
 	while (true) {
@@ -4289,7 +4304,7 @@ static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc
 		int swappiness = sc->may_swap ? get_swappiness(lruvec) : 0;
 
 		nr_to_scan = get_nr_to_scan(lruvec, sc, swappiness) - scanned;
-		if (nr_to_scan < (long)SWAP_CLUSTER_MAX)
+		if (nr_to_scan <= 0)
 			break;
 
 		scanned += nr_to_scan;
@@ -4356,6 +4371,14 @@ static void lru_gen_age_node(struct pglist_data *pgdat, struct scan_control *sc)
 	struct mem_cgroup *memcg;
 
 	VM_BUG_ON(!current_is_kswapd());
+
+	if (!mem_cgroup_disabled() && !sc->force_deactivate) {
+		/* we may clear this later in get_nr_to_scan() */
+		sc->force_deactivate = 1;
+		return;
+	}
+
+	sc->force_deactivate = 0;
 
 	if (!arch_has_hw_pte_young())
 		return;
