@@ -576,7 +576,12 @@ static const struct bcm2835_codec_fmt supported_formats[] = {
 		.depth			= 0,
 		.flags			= V4L2_FMT_FLAG_COMPRESSED,
 		.mmal_fmt		= MMAL_ENCODING_VP8,
-	},
+	}, {
+		.fourcc			= V4L2_PIX_FMT_VC1_ANNEX_G,
+		.depth			= 0,
+		.flags			= V4L2_FMT_FLAG_COMPRESSED,
+		.mmal_fmt		= MMAL_ENCODING_WVC1,
+	}
 };
 
 struct bcm2835_codec_fmt_list {
@@ -602,6 +607,7 @@ struct bcm2835_codec_q_data {
 	unsigned int		crop_width;
 	unsigned int		crop_height;
 	bool			selection_set;
+	struct v4l2_fract	aspect_ratio;
 
 	unsigned int		sizeimage;
 	unsigned int		sequence;
@@ -924,23 +930,43 @@ static void send_eos_event(struct bcm2835_codec_ctx *ctx)
 	v4l2_event_queue_fh(&ctx->fh, &ev);
 }
 
-static void color_mmal2v4l(struct bcm2835_codec_ctx *ctx, u32 mmal_color_space)
+static void color_mmal2v4l(struct bcm2835_codec_ctx *ctx, u32 encoding,
+			   u32 color_space)
 {
-	switch (mmal_color_space) {
-	case MMAL_COLOR_SPACE_ITUR_BT601:
-		ctx->colorspace = V4L2_COLORSPACE_REC709;
-		ctx->xfer_func = V4L2_XFER_FUNC_709;
-		ctx->ycbcr_enc = V4L2_YCBCR_ENC_601;
-		ctx->quant = V4L2_QUANTIZATION_LIM_RANGE;
-		break;
+	int is_rgb;
 
-	case MMAL_COLOR_SPACE_ITUR_BT709:
-		ctx->colorspace = V4L2_COLORSPACE_REC709;
-		ctx->xfer_func = V4L2_XFER_FUNC_709;
-		ctx->ycbcr_enc = V4L2_YCBCR_ENC_709;
-		ctx->quant = V4L2_QUANTIZATION_LIM_RANGE;
+	switch (encoding) {
+	case MMAL_ENCODING_I420:
+	case MMAL_ENCODING_YV12:
+	case MMAL_ENCODING_NV12:
+	case MMAL_ENCODING_NV21:
+	case V4L2_PIX_FMT_YUYV:
+	case V4L2_PIX_FMT_YVYU:
+	case V4L2_PIX_FMT_UYVY:
+	case V4L2_PIX_FMT_VYUY:
+		/* YUV based colourspaces */
+		switch (color_space) {
+		case MMAL_COLOR_SPACE_ITUR_BT601:
+			ctx->colorspace = V4L2_COLORSPACE_SMPTE170M;
+			break;
+
+		case MMAL_COLOR_SPACE_ITUR_BT709:
+			ctx->colorspace = V4L2_COLORSPACE_REC709;
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		/* RGB based colourspaces */
+		ctx->colorspace = V4L2_COLORSPACE_SRGB;
 		break;
 	}
+	ctx->xfer_func = V4L2_MAP_XFER_FUNC_DEFAULT(ctx->colorspace);
+	ctx->ycbcr_enc = V4L2_MAP_YCBCR_ENC_DEFAULT(ctx->colorspace);
+	is_rgb = ctx->colorspace == V4L2_COLORSPACE_SRGB;
+	ctx->quant = V4L2_MAP_QUANTIZATION_DEFAULT(is_rgb, ctx->colorspace,
+						   ctx->ycbcr_enc);
 }
 
 static void handle_fmt_changed(struct bcm2835_codec_ctx *ctx,
@@ -973,13 +999,24 @@ static void handle_fmt_changed(struct bcm2835_codec_ctx *ctx,
 
 	q_data->crop_width = format->es.video.crop.width;
 	q_data->crop_height = format->es.video.crop.height;
+	/*
+	 * Stop S_FMT updating crop_height should it be unaligned.
+	 * Client can still update the crop region via S_SELECTION should it
+	 * really want to, but the decoder is likely to complain that the
+	 * format then doesn't match.
+	 */
+	q_data->selection_set = true;
 	q_data->bytesperline = get_bytesperline(format->es.video.width,
 						q_data->fmt);
 
 	q_data->height = format->es.video.height;
 	q_data->sizeimage = format->buffer_size_min;
 	if (format->es.video.color_space)
-		color_mmal2v4l(ctx, format->es.video.color_space);
+		color_mmal2v4l(ctx, format->format.encoding,
+			       format->es.video.color_space);
+
+	q_data->aspect_ratio.numerator = format->es.video.par.num;
+	q_data->aspect_ratio.denominator = format->es.video.par.den;
 
 	queue_res_chg_event(ctx);
 }
@@ -989,6 +1026,7 @@ static void op_buffer_cb(struct vchiq_mmal_instance *instance,
 			 struct mmal_buffer *mmal_buf)
 {
 	struct bcm2835_codec_ctx *ctx = port->cb_ctx;
+	enum vb2_buffer_state buf_state = VB2_BUF_STATE_DONE;
 	struct m2m_mmal_buffer *buf;
 	struct vb2_v4l2_buffer *vb2;
 
@@ -1045,6 +1083,9 @@ static void op_buffer_cb(struct vchiq_mmal_instance *instance,
 		vb2->flags |= V4L2_BUF_FLAG_LAST;
 	}
 
+	if (mmal_buf->mmal_flags & MMAL_BUFFER_HEADER_FLAG_CORRUPTED)
+		buf_state = VB2_BUF_STATE_ERROR;
+
 	/* vb2 timestamps in nsecs, mmal in usecs */
 	vb2->vb2_buf.timestamp = mmal_buf->pts * 1000;
 
@@ -1052,7 +1093,7 @@ static void op_buffer_cb(struct vchiq_mmal_instance *instance,
 	if (mmal_buf->mmal_flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME)
 		vb2->flags |= V4L2_BUF_FLAG_KEYFRAME;
 
-	vb2_buffer_done(&vb2->vb2_buf, VB2_BUF_STATE_DONE);
+	vb2_buffer_done(&vb2->vb2_buf, buf_state);
 	ctx->num_op_buffers++;
 
 	v4l2_dbg(2, debug, &ctx->dev->v4l2_dev, "%s: done %d output buffers\n",
@@ -1250,6 +1291,8 @@ static int vidioc_g_fmt_vid_cap(struct file *file, void *priv,
 static int vidioc_try_fmt(struct bcm2835_codec_ctx *ctx, struct v4l2_format *f,
 			  struct bcm2835_codec_fmt *fmt)
 {
+	unsigned int sizeimage;
+
 	/*
 	 * The V4L2 specification requires the driver to correct the format
 	 * struct if any of the dimensions is unsupported
@@ -1278,9 +1321,18 @@ static int vidioc_try_fmt(struct bcm2835_codec_ctx *ctx, struct v4l2_format *f,
 	f->fmt.pix_mp.num_planes = 1;
 	f->fmt.pix_mp.plane_fmt[0].bytesperline =
 		get_bytesperline(f->fmt.pix_mp.width, fmt);
-	f->fmt.pix_mp.plane_fmt[0].sizeimage =
-		get_sizeimage(f->fmt.pix_mp.plane_fmt[0].bytesperline,
-			      f->fmt.pix_mp.width, f->fmt.pix_mp.height, fmt);
+	sizeimage = get_sizeimage(f->fmt.pix_mp.plane_fmt[0].bytesperline,
+				  f->fmt.pix_mp.width, f->fmt.pix_mp.height,
+				  fmt);
+	/*
+	 * Drivers must set sizeimage for uncompressed formats
+	 * Compressed formats allow the client to request an alternate
+	 * size for the buffer.
+	 */
+	if (!(fmt->flags & V4L2_FMT_FLAG_COMPRESSED) ||
+	    f->fmt.pix_mp.plane_fmt[0].sizeimage < sizeimage)
+		f->fmt.pix_mp.plane_fmt[0].sizeimage = sizeimage;
+
 	memset(f->fmt.pix_mp.plane_fmt[0].reserved, 0,
 	       sizeof(f->fmt.pix_mp.plane_fmt[0].reserved));
 
@@ -1513,6 +1565,14 @@ static int vidioc_g_selection(struct file *file, void *priv,
 			s->r.width = q_data->crop_width;
 			s->r.height = q_data->crop_height;
 			break;
+		case V4L2_SEL_TGT_CROP_BOUNDS:
+		case V4L2_SEL_TGT_CROP_DEFAULT:
+			s->r.left = 0;
+			s->r.top = 0;
+			s->r.width = (q_data->bytesperline << 3) /
+						q_data->fmt->depth;
+			s->r.height = q_data->height;
+			break;
 		default:
 			return -EINVAL;
 		}
@@ -1657,6 +1717,29 @@ static int vidioc_g_parm(struct file *file, void *priv,
 	return 0;
 }
 
+static int vidioc_g_pixelaspect(struct file *file, void *fh, int type,
+				struct v4l2_fract *f)
+{
+	struct bcm2835_codec_ctx *ctx = file2ctx(file);
+
+	/*
+	 * The selection API takes V4L2_BUF_TYPE_VIDEO_CAPTURE and
+	 * V4L2_BUF_TYPE_VIDEO_OUTPUT, even if the device implements the MPLANE
+	 * API. The V4L2 core will have converted the MPLANE variants to
+	 * non-MPLANE.
+	 * Open code this instead of using get_q_data in this case.
+	 */
+	if (ctx->dev->role != DECODE)
+		return -ENOIOCTLCMD;
+
+	if (type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		return -EINVAL;
+
+	*f = ctx->q_data[V4L2_M2M_DST].aspect_ratio;
+
+	return 0;
+}
+
 static int vidioc_subscribe_evt(struct v4l2_fh *fh,
 				const struct v4l2_event_subscription *sub)
 {
@@ -1748,6 +1831,17 @@ static int bcm2835_codec_set_level_profile(struct bcm2835_codec_ctx *ctx,
 			break;
 		case V4L2_MPEG_VIDEO_H264_LEVEL_4_0:
 			param.level = MMAL_VIDEO_LEVEL_H264_4;
+			break;
+		/*
+		 * Note that the hardware spec is level 4.0. Levels above that
+		 * are there for correctly encoding the headers and may not
+		 * be able to keep up with real-time.
+		 */
+		case V4L2_MPEG_VIDEO_H264_LEVEL_4_1:
+			param.level = MMAL_VIDEO_LEVEL_H264_41;
+			break;
+		case V4L2_MPEG_VIDEO_H264_LEVEL_4_2:
+			param.level = MMAL_VIDEO_LEVEL_H264_42;
 			break;
 		default:
 			/* Should never get here */
@@ -2081,6 +2175,8 @@ static const struct v4l2_ioctl_ops bcm2835_codec_ioctl_ops = {
 
 	.vidioc_g_parm		= vidioc_g_parm,
 	.vidioc_s_parm		= vidioc_s_parm,
+
+	.vidioc_g_pixelaspect	= vidioc_g_pixelaspect,
 
 	.vidioc_subscribe_event = vidioc_subscribe_evt,
 	.vidioc_unsubscribe_event = v4l2_event_unsubscribe,
@@ -2640,6 +2736,8 @@ static int bcm2835_codec_open(struct file *file)
 			      ctx->q_data[V4L2_M2M_DST].crop_width,
 			      ctx->q_data[V4L2_M2M_DST].height,
 			      ctx->q_data[V4L2_M2M_DST].fmt);
+	ctx->q_data[V4L2_M2M_DST].aspect_ratio.numerator = 1;
+	ctx->q_data[V4L2_M2M_DST].aspect_ratio.denominator = 1;
 
 	ctx->colorspace = V4L2_COLORSPACE_REC709;
 	ctx->bitrate = 10 * 1000 * 1000;
@@ -2837,7 +2935,7 @@ static int bcm2835_codec_get_supported_fmts(struct bcm2835_codec_dev *dev)
 	if (ret) {
 		if (ret == MMAL_MSG_STATUS_ENOSPC) {
 			v4l2_err(&dev->v4l2_dev,
-				 "%s: port has more encodings than we provided space for. Some are dropped (%u vs %u).\n",
+				 "%s: port has more encodings than we provided space for. Some are dropped (%zu vs %u).\n",
 				 __func__, param_size / sizeof(u32),
 				 MAX_SUPPORTED_ENCODINGS);
 			num_encodings = MAX_SUPPORTED_ENCODINGS;
@@ -2883,7 +2981,7 @@ static int bcm2835_codec_get_supported_fmts(struct bcm2835_codec_dev *dev)
 	if (ret) {
 		if (ret == MMAL_MSG_STATUS_ENOSPC) {
 			v4l2_err(&dev->v4l2_dev,
-				 "%s: port has more encodings than we provided space for. Some are dropped (%u vs %u).\n",
+				 "%s: port has more encodings than we provided space for. Some are dropped (%zu vs %u).\n",
 				 __func__, param_size / sizeof(u32),
 				 MAX_SUPPORTED_ENCODINGS);
 			num_encodings = MAX_SUPPORTED_ENCODINGS;

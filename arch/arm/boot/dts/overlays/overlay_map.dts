@@ -37,6 +37,10 @@
 		deprecated = "use gpio-ir";
 	};
 
+	pcie-32bit-dma {
+		bcm2711;
+	};
+
 	pi3-act-led {
 		renamed = "act-led";
 	};
@@ -131,6 +135,15 @@
 	};
 
 	upstream-pi4 {
+		bcm2711;
+	};
+
+	vc4-fkms-v3d {
+		bcm2835;
+		bcm2711 = "vc4-fkms-v3d-pi4";
+	};
+
+	vc4-fkms-v3d-pi4 {
 		bcm2711;
 	};
 

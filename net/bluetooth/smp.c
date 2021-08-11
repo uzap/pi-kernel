@@ -883,16 +883,9 @@ static int tk_request(struct l2cap_conn *conn, u8 remote_oob, u8 auth,
 	    hcon->io_capability == HCI_IO_NO_INPUT_OUTPUT)
 		smp->method = JUST_WORKS;
 
-	/* If Just Works, Continue with Zero TK and ask user-space for
-	 * confirmation */
+	/* If Just Works, Continue with Zero TK */
 	if (smp->method == JUST_WORKS) {
-		ret = mgmt_user_confirm_request(hcon->hdev, &hcon->dst,
-						hcon->type,
-						hcon->dst_type,
-						passkey, 1);
-		if (ret)
-			return ret;
-		set_bit(SMP_FLAG_WAIT_USER, &smp->flags);
+		set_bit(SMP_FLAG_TK_VALID, &smp->flags);
 		return 0;
 	}
 
@@ -2201,7 +2194,7 @@ mackey_and_ltk:
 	if (err)
 		return SMP_UNSPECIFIED;
 
-	if (smp->method == REQ_OOB) {
+	if (smp->method == JUST_WORKS || smp->method == REQ_OOB) {
 		if (hcon->out) {
 			sc_dhkey_check(smp);
 			SMP_ALLOW_CMD(smp, SMP_CMD_DHKEY_CHECK);
@@ -2216,9 +2209,6 @@ mackey_and_ltk:
 	confirm_hint = 0;
 
 confirm:
-	if (smp->method == JUST_WORKS)
-		confirm_hint = 1;
-
 	err = mgmt_user_confirm_request(hcon->hdev, &hcon->dst, hcon->type,
 					hcon->dst_type, passkey, confirm_hint);
 	if (err)
@@ -2732,6 +2722,15 @@ static int smp_cmd_public_key(struct l2cap_conn *conn, struct sk_buff *skb)
 
 	if (skb->len < sizeof(*key))
 		return SMP_INVALID_PARAMS;
+
+	/* Check if remote and local public keys are the same and debug key is
+	 * not in use.
+	 */
+	if (!test_bit(SMP_FLAG_DEBUG_KEY, &smp->flags) &&
+	    !crypto_memneq(key, smp->local_pk, 64)) {
+		bt_dev_err(hdev, "Remote and local public keys are identical");
+		return SMP_UNSPECIFIED;
+	}
 
 	memcpy(smp->remote_pk, key, 64);
 

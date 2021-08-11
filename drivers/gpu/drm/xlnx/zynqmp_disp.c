@@ -1398,19 +1398,11 @@ static void zynqmp_disp_enable(struct zynqmp_disp *disp)
  */
 static void zynqmp_disp_disable(struct zynqmp_disp *disp)
 {
-	struct drm_crtc *crtc = &disp->crtc;
-
 	zynqmp_disp_audio_disable(&disp->audio);
 
 	zynqmp_disp_avbuf_disable_audio(&disp->avbuf);
 	zynqmp_disp_avbuf_disable_channels(&disp->avbuf);
 	zynqmp_disp_avbuf_disable(&disp->avbuf);
-
-	/* Mark the flip is done as crtc is disabled anyway */
-	if (crtc->state->event) {
-		complete_all(crtc->state->event->base.completion);
-		crtc->state->event = NULL;
-	}
 }
 
 static inline struct zynqmp_disp *crtc_to_disp(struct drm_crtc *crtc)
@@ -1501,6 +1493,13 @@ zynqmp_disp_crtc_atomic_disable(struct drm_crtc *crtc,
 
 	drm_crtc_vblank_off(&disp->crtc);
 
+	spin_lock_irq(&crtc->dev->event_lock);
+	if (crtc->state->event) {
+		drm_crtc_send_vblank_event(crtc, crtc->state->event);
+		crtc->state->event = NULL;
+	}
+	spin_unlock_irq(&crtc->dev->event_lock);
+
 	clk_disable_unprepare(disp->pclk);
 	pm_runtime_put_sync(disp->dev);
 }
@@ -1508,9 +1507,7 @@ zynqmp_disp_crtc_atomic_disable(struct drm_crtc *crtc,
 static int zynqmp_disp_crtc_atomic_check(struct drm_crtc *crtc,
 					 struct drm_atomic_state *state)
 {
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state,
-									  crtc);
-	return drm_atomic_add_affected_planes(crtc_state->state, crtc);
+	return drm_atomic_add_affected_planes(state, crtc);
 }
 
 static void
