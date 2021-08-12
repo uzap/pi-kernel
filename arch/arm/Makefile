@@ -96,6 +96,10 @@ tune-$(CONFIG_CPU_FEROCEON)	=-mtune=xscale
 tune-$(CONFIG_CPU_V6)		=-mtune=arm1136j-s
 tune-$(CONFIG_CPU_V6K)		=-mtune=arm1136j-s
 
+tune-$(CONFIG_TUNE_BCMRPI)	=-mtune=arm1176jzf-s
+tune-$(CONFIG_TUNE_BCM2709)	=-mtune=cortex-a53
+tune-$(CONFIG_TUNE_BCM2711)	=-mtune=cortex-a72
+
 # Evaluate tune cc-option calls now
 tune-y := $(tune-y)
 

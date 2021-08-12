@@ -1619,6 +1619,8 @@ config STACKPROTECTOR_PER_TASK
 	  Enable this option to switch to a different method that uses a
 	  different canary value for each task.
 
+source "arch/arm/Kconfig.rpi"
+
 endmenu
 
 menu "Boot options"

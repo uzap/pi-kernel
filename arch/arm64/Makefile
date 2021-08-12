@@ -98,6 +98,12 @@ KBUILD_CFLAGS	+= -Wa,-march=$(asm-arch) \
 		   -DARM64_ASM_ARCH='"$(asm-arch)"'
 endif
 
+tune-$(CONFIG_TUNE_BCM2709) := -mtune=cortex-a53
+tune-$(CONFIG_TUNE_BCM2711) := -mtune=cortex-a72
+
+KBUILD_CFLAGS += $(tune-y)
+KBUILD_AFLAGS += $(tune-y)
+
 ifeq ($(CONFIG_SHADOW_CALL_STACK), y)
 KBUILD_CFLAGS	+= -ffixed-x18
 endif
