@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-2.0
+choice
+	prompt "Raspberry Pi Tuning"
+	depends on ARCH_BCM2835
+	default TUNE_BCMRPI
+	help
+	  This will tune the compiler based on Raspberry Pi targets.
+
+config TUNE_BCMRPI
+	bool "BCMRPI"
+	help
+	  Select this to tune the compiled code for Raspberry Pi 1, Pi Zero,
+	  Pi Zero W, and Compute Module.
+
+config TUNE_BCM2709
+	bool "BCM2709"
+	help
+	  Select this to tune the compiled code for Raspberry Pi 2, Pi 3, Pi
+	  3+, and Compute Module 3.
+
+config TUNE_BCM2711
+	bool "BCM2711"
+	help
+	  Select this to tune the compiled code for Raspberry Pi 4, 400, and
+	  Compute Module 4.
+
+endchoice

@@ -96,8 +96,9 @@ tune-$(CONFIG_CPU_FEROCEON)	=$(call cc-option,-mtune=marvell-f,-mtune=xscale)
 tune-$(CONFIG_CPU_V6)		=$(call cc-option,-mtune=arm1136j-s,-mtune=strongarm)
 tune-$(CONFIG_CPU_V6K)		=$(call cc-option,-mtune=arm1136j-s,-mtune=strongarm)
 
-# TODO: Properly create targets per config
-tune-$(CONFIG_ARCH_BCM2835)     =-mtune=cortex-a72
+tune-$(CONFIG_TUNE_BCMRPI)	=-mtune=arm1176jzf-s
+tune-$(CONFIG_TUNE_BCM2709)	=-mtune=cortex-a53
+tune-$(CONFIG_TUNE_BCM2711)	=-mtune=cortex-a72
 
 # Evaluate tune cc-option calls now
 tune-y := $(tune-y)
