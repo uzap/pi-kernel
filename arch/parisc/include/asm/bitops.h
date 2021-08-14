@@ -213,13 +213,6 @@ static __inline__ int fls(unsigned int x)
 #include <asm-generic/bitops/hweight.h>
 #include <asm-generic/bitops/lock.h>
 #include <asm-generic/bitops/sched.h>
-
-#endif /* __KERNEL__ */
-
-#include <asm-generic/bitops/find.h>
-
-#ifdef __KERNEL__
-
 #include <asm-generic/bitops/le.h>
 #include <asm-generic/bitops/ext2-atomic-setbit.h>
 
