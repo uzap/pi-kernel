@@ -187,7 +187,7 @@ config ARCH_BCM_53573
 
 config BCM2835_FAST_MEMCPY
 	bool "Enable optimized __copy_to_user and __copy_from_user"
-	depends on ARCH_BCM2835 && ARCH_MULTI_V6
+	depends on ARCH_BCM2835 && ARCH_MULTI_V6 && !CC_IS_CLANG
 	default y
 	help
 	  Optimized versions of __copy_to_user and __copy_from_user for Pi1.
