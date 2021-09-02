@@ -576,7 +576,7 @@ static int copy_strings(int argc, struct user_arg_ptr argv,
 				}
 
 				if (kmapped_page) {
-					flush_kernel_dcache_page(kmapped_page);
+					flush_dcache_page(kmapped_page);
 					kunmap(kmapped_page);
 					put_arg_page(kmapped_page);
 				}
@@ -594,7 +594,7 @@ static int copy_strings(int argc, struct user_arg_ptr argv,
 	ret = 0;
 out:
 	if (kmapped_page) {
-		flush_kernel_dcache_page(kmapped_page);
+		flush_dcache_page(kmapped_page);
 		kunmap(kmapped_page);
 		put_arg_page(kmapped_page);
 	}
@@ -636,7 +636,7 @@ int copy_string_kernel(const char *arg, struct linux_binprm *bprm)
 		kaddr = kmap_atomic(page);
 		flush_arg_page(bprm, pos & PAGE_MASK, page);
 		memcpy(kaddr + offset_in_page(pos), arg, bytes_to_copy);
-		flush_kernel_dcache_page(page);
+		flush_dcache_page(page);
 		kunmap_atomic(kaddr);
 		put_arg_page(page);
 	}

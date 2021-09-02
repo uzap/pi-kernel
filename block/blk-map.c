@@ -351,7 +351,7 @@ static void bio_unmap_user(struct bio *bio)
 
 static void bio_invalidate_vmalloc_pages(struct bio *bio)
 {
-#ifdef ARCH_HAS_FLUSH_KERNEL_DCACHE_PAGE
+#ifdef ARCH_IMPLEMENTS_FLUSH_KERNEL_VMAP_RANGE
 	if (bio->bi_private && !op_is_write(bio_op(bio))) {
 		unsigned long i, len = 0;
 
