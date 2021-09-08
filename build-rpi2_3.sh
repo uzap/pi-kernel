@@ -7,7 +7,7 @@ cdate=`date "+%Y-%m-%d"`
 
 make LLVM=1 LLVM_IAS=1 ARCH=arm \
   CROSS_COMPILE=arm-linux-gnueabihf- $CONFIG
-scripts/config -e LTO_CLANG_THIN
+scripts/config -e LTO_CLANG_FULL
 logsave build.log make -j$JOBS LLVM=1 LLVM_IAS=1 ARCH=arm \
   CROSS_COMPILE=arm-linux-gnueabihf- zImage modules dtbs
 if [ -e arch/arm/boot/zImage ]; then
