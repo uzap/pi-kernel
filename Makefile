@@ -736,7 +736,12 @@ KBUILD_CFLAGS	+= $(call cc-disable-warning, address-of-packed-member)
 ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
 KBUILD_CFLAGS += -O2
 else ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3
-KBUILD_CFLAGS += -O3
+ifdef CONFIG_CC_IS_CLANG
+FP_CFLAGS := -ffp-model=fast
+else
+FP_CFLAGS := -ffast-math -ffp-contract=fast
+endif
+KBUILD_CFLAGS += -O3 $(FP_CFLAGS)
 else ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
 KBUILD_CFLAGS += -Os
 endif
