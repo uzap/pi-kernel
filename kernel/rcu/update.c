@@ -195,6 +195,8 @@ void rcu_end_inkernel_boot(void)
 	rcu_unexpedite_gp();
 	if (rcu_normal_after_boot)
 		WRITE_ONCE(rcu_normal, 1);
+	/* Disable rcu_expedited after booting */
+	WRITE_ONCE(rcu_expedited, 0);
 	rcu_boot_ended = true;
 }
 
