@@ -8878,11 +8878,10 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 	if (!idlest)
 		return NULL;
 
-	if (local_sgs.avg_load == UINT_MAX)
-		return idlest;
-
-	/* The local group has been skipped because of CPU affinity */
-	if (!local)
+	/* The local group has been skipped because of CPU affinity,
+	 * max average load, or overloaded. */
+	if (!local || (local_sgs.avg_load == UINT_MAX) ||
+		(local_sgs.group_type == group_overloaded))
 		return idlest;
 
 	/*
