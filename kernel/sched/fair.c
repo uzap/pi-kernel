@@ -766,6 +766,9 @@ void init_entity_runnable_average(struct sched_entity *se)
 	if (entity_is_task(se))
 		sa->load_avg = scale_load_down(se->load.weight);
 
+	sa->util_avg = scale_load_down(SCHED_CAPACITY_SCALE >> 1L);
+	sa->util_sum = sa->util_avg * LOAD_AVG_MAX;
+
 	/* when this task enqueue'ed, it will contribute to its cfs_rq's load_avg */
 }
 
@@ -802,20 +805,6 @@ void post_init_entity_util_avg(struct task_struct *p)
 	struct sched_entity *se = &p->se;
 	struct cfs_rq *cfs_rq = cfs_rq_of(se);
 	struct sched_avg *sa = &se->avg;
-	long cpu_scale = arch_scale_cpu_capacity(cpu_of(rq_of(cfs_rq)));
-	long cap = (long)(cpu_scale - cfs_rq->avg.util_avg) / 2;
-
-	if (cap > 0) {
-		if (cfs_rq->avg.util_avg != 0) {
-			sa->util_avg  = cfs_rq->avg.util_avg * se->load.weight;
-			sa->util_avg /= (cfs_rq->avg.load_avg + 1);
-
-			if (sa->util_avg > cap)
-				sa->util_avg = cap;
-		} else {
-			sa->util_avg = cap;
-		}
-	}
 
 	sa->runnable_avg = sa->util_avg;
 
@@ -4073,6 +4062,20 @@ done:
 static inline int task_fits_capacity(struct task_struct *p, long capacity)
 {
 	return fits_capacity(uclamp_task_util(p), capacity);
+}
+
+static inline bool task_fits_max(struct task_struct *p, int cpu)
+{
+	unsigned long capacity = capacity_of(cpu);
+	unsigned long max_capacity = cpu_rq(cpu)->rd->max_cpu_capacity;
+
+	if (capacity == max_capacity)
+		return true;
+
+	if (capacity * 1280 > max_capacity * 1024)
+		return true;
+
+	return task_fits_capacity(p, capacity);
 }
 
 static inline void update_misfit_status(struct task_struct *p, struct rq *rq)
@@ -7734,6 +7737,10 @@ static int detach_tasks(struct lb_env *env)
 			break;
 		}
 
+		if ((env->idle == CPU_NOT_IDLE) &&
+			(!task_fits_max(p, env->dst_cpu)))
+				goto next;
+
 		if (!can_migrate_task(p, env))
 			goto next;
 
@@ -8844,6 +8851,9 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 					p->cpus_ptr))
 			continue;
 
+		if (!task_fits_max(p, group_first_cpu(group)))
+			continue;
+
 		local_group = cpumask_test_cpu(this_cpu,
 					       sched_group_span(group));
 
@@ -8867,6 +8877,9 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 	/* There is no idlest group to push tasks to */
 	if (!idlest)
 		return NULL;
+
+	if (local_sgs.avg_load == UINT_MAX)
+		return idlest;
 
 	/* The local group has been skipped because of CPU affinity */
 	if (!local)
