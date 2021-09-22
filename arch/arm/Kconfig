@@ -192,7 +192,7 @@ config LOCKDEP_SUPPORT
 
 config TRACE_IRQFLAGS_SUPPORT
 	bool
-	default !CPU_V7M
+	default n
 
 config ARCH_HAS_ILOG2_U32
 	bool
