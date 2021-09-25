@@ -4120,9 +4120,32 @@ done:
 	trace_sched_util_est_se_tp(&p->se);
 }
 
+/*
+ * Returns the current capacity of cpu after applying both
+ * cpu and freq scaling.
+ */
+static unsigned long capacity_curr_of(int cpu)
+{
+	unsigned long max_cap = cpu_rq(cpu)->cpu_capacity_orig;
+	unsigned long scale_freq = arch_scale_freq_capacity(cpu);
+
+	return cap_scale(max_cap, scale_freq);
+}
+
 static inline int task_fits_capacity(struct task_struct *p, long capacity)
 {
 	return fits_capacity(uclamp_task_util(p), capacity);
+}
+
+static inline bool task_fits_curr(struct task_struct *p, int cpu)
+{
+	unsigned long capacity = capacity_curr_of(cpu);
+	unsigned long max_capacity = READ_ONCE(cpu_rq(cpu)->rd->max_cpu_capacity);
+
+	if (capacity == max_capacity)
+		return true;
+
+	return fits_capacity(task_util_est(p), capacity);
 }
 
 static inline void update_misfit_status(struct task_struct *p, struct rq *rq)
@@ -6931,6 +6954,9 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 	/* SD_flags and WF_flags share the first nibble */
 	int sd_flag = wake_flags & 0xF;
 
+	if (task_fits_curr(p, prev_cpu))
+		return prev_cpu;
+
 	/*
 	 * required for stable ->cpus_allowed
 	 */
@@ -7975,6 +8001,10 @@ static int detach_tasks(struct lb_env *env)
 			env->flags |= LBF_NEED_BREAK;
 			break;
 		}
+
+		if ((env->idle == CPU_NOT_IDLE) &&
+			(!task_fits_curr(p, env->dst_cpu)))
+				goto next;
 
 		if (!can_migrate_task(p, env))
 			goto next;
@@ -9040,6 +9070,10 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 		if (!sched_group_cookie_match(cpu_rq(this_cpu), p, group))
 			continue;
 
+		/* Skip over this group if it does not fit CPU cap */
+		if (!task_fits_curr(p, group_first_cpu(group)))
+			continue;
+
 		local_group = cpumask_test_cpu(this_cpu,
 					       sched_group_span(group));
 
@@ -9063,6 +9097,9 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 	/* There is no idlest group to push tasks to */
 	if (!idlest)
 		return NULL;
+
+	if (local_sgs.avg_load == UINT_MAX)
+		return idlest;
 
 	/* The local group has been skipped because of CPU affinity */
 	if (!local)
