@@ -178,10 +178,7 @@ static void od_update(struct cpufreq_policy *policy)
 #ifdef CONFIG_SMP
 		unsigned long cap, util, min_util;
 		unsigned int boost_freq;
-
-		util = rec_util_est;
-		min_util = util + (util >> 2);
-		cap = capacity_curr_of(rec_task_cpu);
+		u64 now;
 #endif
 
 		min_f = policy->cpuinfo.min_freq;
@@ -189,9 +186,16 @@ static void od_update(struct cpufreq_policy *policy)
 		freq_next = min_f + load * (max_f - min_f) / 100;
 
 #ifdef CONFIG_SMP
+		if (!rec_util_est || !task_boost_endtime)
+			goto out;
+
+		util = rec_util_est;
+		min_util = util + (util >> 2);
+		cap = capacity_curr_of(rec_task_cpu);
+
 		if (min_util > cap) {
 			u64 prev_boost_endtime = task_boost_endtime;
-			u64 now = ktime_to_us(ktime_get());
+			now = ktime_to_us(ktime_get());
 
 			task_boost_endtime = now + dbs_data->sampling_rate;
 			boost_freq = get_freq_for_util(policy, min_util);
@@ -199,11 +203,12 @@ static void od_update(struct cpufreq_policy *policy)
 			if ((now < prev_boost_endtime) &&
 						(boost_freq <= freq_next))
 				goto out;
-
-			get_cpu_idle_time(policy->cpu, &now, dbs_data->io_is_busy);
-			if (now < task_boost_endtime)
-				freq_next = boost_freq;
 		}
+
+		get_cpu_idle_time(policy->cpu, &now, dbs_data->io_is_busy);
+		if ((now < task_boost_endtime) &&
+					(freq_next < boost_freq))
+			freq_next = boost_freq;
 
 out:
 #endif
