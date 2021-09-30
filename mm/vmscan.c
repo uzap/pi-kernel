@@ -4282,11 +4282,6 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, int s
 	if (!nr_to_scan || nr_gens > MIN_NR_GENS)
 		return nr_to_scan;
 
-	if (!arch_has_hw_pte_young()) {
-		inc_max_seq(lruvec, max_seq);
-		return nr_to_scan;
-	}
-
 	/* move onto other memcgs if we haven't tried them all yet */
 	if (memcg && !sc->force_deactivate) {
 		sc->skipped_deactivate = 1;
@@ -4401,9 +4396,6 @@ static void lru_gen_age_node(struct pglist_data *pgdat, struct scan_control *sc)
 	}
 
 	sc->force_deactivate = 0;
-
-	if (!arch_has_hw_pte_young())
-		return;
 
 	memcg = mem_cgroup_iter(NULL, NULL, NULL);
 	do {
