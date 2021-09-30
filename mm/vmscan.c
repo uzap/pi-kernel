@@ -4235,7 +4235,7 @@ static int get_swappiness(struct lruvec *lruvec)
 	return swappiness;
 }
 
-static DEFINE_RATELIMIT_STATE(lru_gen_min_ttl, 0, 1);
+static DEFINE_RATELIMIT_STATE(lru_gen_min_ttl, 1000, 1);
 
 static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, int swappiness)
 {
