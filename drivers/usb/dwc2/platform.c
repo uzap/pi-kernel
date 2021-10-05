@@ -36,6 +36,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/kthread.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/clk.h>
@@ -55,6 +56,7 @@
 #include "debug.h"
 
 static const char dwc2_driver_name[] = "dwc2";
+static const struct dev_pm_ops dwc2_dev_pm_ops;
 
 /*
  * Check the dr_mode against the module configuration and hardware
@@ -417,34 +419,37 @@ int dwc2_check_core_version(struct dwc2_hsotg *hsotg)
  * in the device private data. This allows the driver to access the dwc2_hsotg
  * structure on subsequent calls to driver methods for this device.
  */
-static int dwc2_driver_probe(struct platform_device *dev)
+static int __dwc2_driver_probe(void *p)
 {
+	struct platform_device *pdev = p;
+	struct device *dev = &pdev->dev;
 	struct dwc2_hsotg *hsotg;
 	struct resource *res;
+	struct platform_driver *drv = to_platform_driver(dev->driver);
 	int retval;
 
-	hsotg = devm_kzalloc(&dev->dev, sizeof(*hsotg), GFP_KERNEL);
+	hsotg = devm_kzalloc(dev, sizeof(*hsotg), GFP_KERNEL);
 	if (!hsotg)
 		return -ENOMEM;
 
-	hsotg->dev = &dev->dev;
+	hsotg->dev = dev;
 
 	/*
 	 * Use reasonable defaults so platforms don't have to provide these.
 	 */
-	if (!dev->dev.dma_mask)
-		dev->dev.dma_mask = &dev->dev.coherent_dma_mask;
-	retval = dma_set_coherent_mask(&dev->dev, DMA_BIT_MASK(32));
+	if (pdev->dev.dma_mask)
+		pdev->dev.dma_mask = &pdev->dev.coherent_dma_mask;
+	retval = dma_set_coherent_mask(dev, DMA_BIT_MASK(32));
 	if (retval) {
-		dev_err(&dev->dev, "can't set coherent DMA mask: %d\n", retval);
+		dev_err(dev, "can't set coherent DMA mask: %d\n", retval);
 		return retval;
 	}
 
-	hsotg->regs = devm_platform_get_and_ioremap_resource(dev, 0, &res);
+	hsotg->regs = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(hsotg->regs))
 		return PTR_ERR(hsotg->regs);
 
-	dev_dbg(&dev->dev, "mapped PA %08lx to VA %p\n",
+	dev_dbg(dev, "mapped PA %08lx to VA %p\n",
 		(unsigned long)res->start, hsotg->regs);
 
 	retval = dwc2_lowlevel_hw_init(hsotg);
@@ -453,7 +458,7 @@ static int dwc2_driver_probe(struct platform_device *dev)
 
 	spin_lock_init(&hsotg->lock);
 
-	hsotg->irq = platform_get_irq(dev, 0);
+	hsotg->irq = platform_get_irq(pdev, 0);
 	if (hsotg->irq < 0)
 		return hsotg->irq;
 
@@ -484,7 +489,7 @@ static int dwc2_driver_probe(struct platform_device *dev)
 		goto error;
 
 	hsotg->need_phy_for_wake =
-		of_property_read_bool(dev->dev.of_node,
+		of_property_read_bool(pdev->dev.of_node,
 				      "snps,need-phy-for-wake");
 
 	/*
@@ -564,10 +569,10 @@ static int dwc2_driver_probe(struct platform_device *dev)
 	 * can adjust this condition.
 	 */
 	if (hsotg->need_phy_for_wake)
-		device_set_wakeup_capable(&dev->dev, true);
+		device_set_wakeup_capable(dev, true);
 
 	hsotg->reset_phy_on_wake =
-		of_property_read_bool(dev->dev.of_node,
+		of_property_read_bool(pdev->dev.of_node,
 				      "snps,reset-phy-on-wake");
 	if (hsotg->reset_phy_on_wake && !hsotg->phy) {
 		dev_warn(hsotg->dev,
@@ -585,7 +590,7 @@ static int dwc2_driver_probe(struct platform_device *dev)
 		hsotg->hcd_enabled = 1;
 	}
 
-	platform_set_drvdata(dev, hsotg);
+	platform_set_drvdata(pdev, hsotg);
 	hsotg->hibernated = 0;
 
 	dwc2_debugfs_init(hsotg);
@@ -606,6 +611,7 @@ static int dwc2_driver_probe(struct platform_device *dev)
 		}
 	}
 #endif /* CONFIG_USB_DWC2_PERIPHERAL || CONFIG_USB_DWC2_DUAL_ROLE */
+	drv->driver.pm = &dwc2_dev_pm_ops;
 	return 0;
 
 #if IS_ENABLED(CONFIG_USB_DWC2_PERIPHERAL) || \
@@ -625,6 +631,18 @@ error:
 	if (hsotg->dr_mode != USB_DR_MODE_PERIPHERAL)
 		dwc2_lowlevel_hw_disable(hsotg);
 	return retval;
+}
+
+static int dwc2_driver_probe(struct platform_device *pdev)
+{
+	struct task_struct *tsk;
+
+	tsk = kthread_run(__dwc2_driver_probe, pdev, "dwc2-driver");
+	if (IS_ERR(tsk)) {
+		dev_err(&pdev->dev, "start dwc2-driver thread failed\n");
+		return PTR_ERR(tsk);
+	}
+	return 0;
 }
 
 static int __maybe_unused dwc2_suspend(struct device *dev)
@@ -735,7 +753,6 @@ static struct platform_driver dwc2_platform_driver = {
 		.name = dwc2_driver_name,
 		.of_match_table = dwc2_of_match_table,
 		.acpi_match_table = ACPI_PTR(dwc2_acpi_match),
-		.pm = &dwc2_dev_pm_ops,
 	},
 	.probe = dwc2_driver_probe,
 	.remove = dwc2_driver_remove,
