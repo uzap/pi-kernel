@@ -5593,7 +5593,6 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 #ifdef CONFIG_SMP
 	unsigned long curr_util, max;
 
-	util_task_est = task_util_est(p);
 	curr_task_cpu = rq->cpu;
 	max = arch_scale_cpu_capacity(curr_task_cpu);
 	curr_util = effective_cpu_util(curr_task_cpu, cpu_util_cfs(rq), max,
