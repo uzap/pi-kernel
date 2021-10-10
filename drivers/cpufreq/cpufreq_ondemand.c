@@ -185,7 +185,8 @@ static void od_update(struct cpufreq_policy *policy)
 		freq_next = min_f + load * (max_f - min_f) / 100;
 
 #ifdef CONFIG_SMP
-		if (!util_task_est || !task_boost_endtime)
+		if (!util_task_est || !task_boost_endtime ||
+				      (freq_next == policy->max))
 			goto out;
 
 		est_util = util_task_est;
