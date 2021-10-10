@@ -146,10 +146,9 @@ static unsigned int get_freq_for_util(struct cpufreq_policy *policy,
 	return freq;
 }
 
-extern unsigned int rec_task_cpu;
-extern unsigned long rec_util_est;
+extern unsigned int curr_task_cpu;
+extern unsigned long util_task_est;
 extern unsigned long capacity_curr_of(int cpu);
-u64 task_boost_endtime;
 #endif
 /*
  * Every sampling_rate, we check, if current idle time is less than 20%
@@ -176,9 +175,9 @@ static void od_update(struct cpufreq_policy *policy)
 		/* Calculate the next frequency proportional to load */
 		unsigned int freq_next, min_f, max_f;
 #ifdef CONFIG_SMP
-		unsigned long cap, util, min_util;
+		unsigned long cap, est_util;
 		unsigned int boost_freq;
-		u64 now;
+		u64 now, task_boost_endtime = 0;
 #endif
 
 		min_f = policy->cpuinfo.min_freq;
@@ -186,19 +185,18 @@ static void od_update(struct cpufreq_policy *policy)
 		freq_next = min_f + load * (max_f - min_f) / 100;
 
 #ifdef CONFIG_SMP
-		if (!rec_util_est || !task_boost_endtime)
+		if (!util_task_est || !task_boost_endtime)
 			goto out;
 
-		util = rec_util_est;
-		min_util = util + (util >> 2);
-		cap = capacity_curr_of(rec_task_cpu);
+		est_util = util_task_est;
+		cap = capacity_curr_of(curr_task_cpu);
 
-		if (min_util > cap) {
+		if (est_util > cap) {
 			u64 prev_boost_endtime = task_boost_endtime;
 			now = ktime_to_us(ktime_get());
 
 			task_boost_endtime = now + dbs_data->sampling_rate;
-			boost_freq = get_freq_for_util(policy, min_util);
+			boost_freq = get_freq_for_util(policy, est_util);
 
 			if ((now < prev_boost_endtime) &&
 						(boost_freq <= freq_next))
