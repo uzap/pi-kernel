@@ -84,11 +84,6 @@ static unsigned int normalized_sysctl_sched_wakeup_granularity	= 1000000UL;
 
 const_debug unsigned int sysctl_sched_migration_cost	= 500000UL;
 
-#ifdef CONFIG_SMP
-unsigned long rec_util_est = 0;
-unsigned int rec_task_cpu = 0;
-#endif
-
 int sched_thermal_decay_shift;
 static int __init setup_sched_thermal_decay_shift(char *str)
 {
@@ -5591,10 +5586,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	int idle_h_nr_running = task_has_idle_policy(p);
 	int task_new = !(flags & ENQUEUE_WAKEUP);
 
-#ifdef CONFIG_SMP
-	rec_util_est = task_util_est(p);
-	rec_task_cpu = rq->cpu;
-#endif
+	cpufreq_task_boost(rq->cpu, task_util_est(p));
 
 	/*
 	 * The code below (indirectly) updates schedutil which looks at
