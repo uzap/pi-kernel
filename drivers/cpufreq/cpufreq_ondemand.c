@@ -126,30 +126,6 @@ static void dbs_freq_increase(struct cpufreq_policy *policy, unsigned int freq)
 			CPUFREQ_RELATION_L : CPUFREQ_RELATION_H);
 }
 
-#ifdef CONFIG_SMP
-static unsigned int get_freq_for_util(struct cpufreq_policy *policy,
-				      unsigned long util)
-{
-	struct cpufreq_frequency_table *pos;
-	unsigned long max_cap, cur_cap;
-	unsigned int freq = 0;
-
-	max_cap = arch_scale_cpu_capacity(policy->cpu);
-	cpufreq_for_each_valid_entry(pos, policy->freq_table) {
-		freq = pos->frequency;
-
-		cur_cap = max_cap * freq / policy->max;
-		if (cur_cap > util)
-			break;
-	}
-
-	return freq;
-}
-
-extern unsigned int curr_task_cpu;
-extern unsigned long util_task_est;
-extern unsigned long capacity_curr_of(int cpu);
-#endif
 /*
  * Every sampling_rate, we check, if current idle time is less than 20%
  * (default), then we try to increase frequency. Else, we adjust the frequency
@@ -174,43 +150,17 @@ static void od_update(struct cpufreq_policy *policy)
 	} else {
 		/* Calculate the next frequency proportional to load */
 		unsigned int freq_next, min_f, max_f;
-#ifdef CONFIG_SMP
-		unsigned long cap, est_util;
-		unsigned int boost_freq;
-		u64 now, task_boost_endtime = 0;
-#endif
+		u64 now;
 
 		min_f = policy->cpuinfo.min_freq;
 		max_f = policy->cpuinfo.max_freq;
 		freq_next = min_f + load * (max_f - min_f) / 100;
 
-#ifdef CONFIG_SMP
-		if (!util_task_est || !task_boost_endtime ||
-				      (freq_next == policy->max))
-			goto out;
-
-		est_util = util_task_est;
-		cap = capacity_curr_of(curr_task_cpu);
-
-		if (est_util > cap) {
-			u64 prev_boost_endtime = task_boost_endtime;
-			now = ktime_to_us(ktime_get());
-
-			task_boost_endtime = now + dbs_data->sampling_rate;
-			boost_freq = get_freq_for_util(policy, est_util);
-
-			if ((now < prev_boost_endtime) &&
-						(boost_freq <= freq_next))
-				goto out;
-		}
-
 		get_cpu_idle_time(policy->cpu, &now, dbs_data->io_is_busy);
-		if ((now < task_boost_endtime) &&
-					(freq_next < boost_freq))
-			freq_next = boost_freq;
+		if ((now < dbs_data->task_boost_endtime) &&
+				   (freq_next < dbs_data->task_boost_freq))
+			freq_next = dbs_data->task_boost_freq;
 
-out:
-#endif
 		/* No longer fully busy, reset rate_mult */
 		policy_dbs->rate_mult = 1;
 

@@ -325,6 +325,15 @@ struct cpufreq_driver {
 					unsigned int index);
 	unsigned int	(*fast_switch)(struct cpufreq_policy *policy,
 				       unsigned int target_freq);
+	/*
+	 * ->fast_switch() replacement for drivers that use an internal
+	 * representation of performance levels and can pass hints other than
+	 * the target performance level to the hardware.
+	 */
+	void		(*adjust_perf)(unsigned int cpu,
+				       unsigned long min_perf,
+				       unsigned long target_perf,
+				       unsigned long capacity);
 
 	/*
 	 * Caches and returns the lowest driver-supported frequency greater than
@@ -593,6 +602,11 @@ struct cpufreq_governor {
 /* Pass a target to the cpufreq driver */
 unsigned int cpufreq_driver_fast_switch(struct cpufreq_policy *policy,
 					unsigned int target_freq);
+void cpufreq_driver_adjust_perf(unsigned int cpu,
+				unsigned long min_perf,
+				unsigned long target_perf,
+				unsigned long capacity);
+bool cpufreq_driver_has_adjust_perf(void);
 int cpufreq_driver_target(struct cpufreq_policy *policy,
 				 unsigned int target_freq,
 				 unsigned int relation);
@@ -1030,6 +1044,8 @@ void sched_cpufreq_governor_change(struct cpufreq_policy *policy,
 static inline void sched_cpufreq_governor_change(struct cpufreq_policy *policy,
 			struct cpufreq_governor *old_gov) { }
 #endif
+
+void cpufreq_task_boost(int cpu, unsigned long util);
 
 extern void arch_freq_prepare_all(void);
 extern unsigned int arch_freq_get_on_cpu(int cpu);
