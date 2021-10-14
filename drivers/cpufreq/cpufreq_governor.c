@@ -237,14 +237,23 @@ static unsigned int get_freq_for_util(struct cpufreq_policy *policy,
 
 	max_cap = arch_scale_cpu_capacity(policy->cpu);
 
+#ifdef CONFIG_SMP
 	est_freq = arch_scale_freq_invariant() ?
 			      policy->cpuinfo.max_freq : policy->cur;
+#endif
 	est_freq = map_util_freq(util, est_freq, max_cap);
 
 	return cpufreq_driver_resolve_freq(policy, est_freq);
 }
 
+#ifdef CONFIG_SMP
 extern unsigned long capacity_curr_of(int cpu);
+#else
+static unsigned long capacity_curr_of(int cpu)
+{
+	return 0;
+}
+#endif
 
 void cpufreq_task_boost(int cpu, unsigned long util)
 {
@@ -255,6 +264,11 @@ void cpufreq_task_boost(int cpu, unsigned long util)
 
 	if (!policy || (policy->cur == policy->max))
 		return;
+
+#ifndef CONFIG_SMP
+	if (util == 0)
+		return;
+#endif
 
 	util = map_util_perf(util);
 	cap = capacity_curr_of(cpu);
