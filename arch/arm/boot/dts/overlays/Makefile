@@ -4,6 +4,7 @@ dtb-$(CONFIG_ARCH_BCM2835) += overlay_map.dtb
 
 dtbo-$(CONFIG_ARCH_BCM2835) += \
 	act-led.dtbo \
+	adafruit-st7735r.dtbo \
 	adafruit18.dtbo \
 	adau1977-adc.dtbo \
 	adau7002-simple.dtbo \
@@ -98,6 +99,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	imx290.dtbo \
 	imx378.dtbo \
 	imx477.dtbo \
+	imx519.dtbo \
 	iqaudio-codec.dtbo \
 	iqaudio-dac.dtbo \
 	iqaudio-dacplus.dtbo \
