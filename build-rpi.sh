@@ -22,7 +22,7 @@ if [ -e arch/arm/boot/zImage ]; then
   cp arch/arm/boot/dts/overlays/README out/boot/overlays/
   cp arch/arm/boot/zImage out/boot/$KERNEL.img
   cd out
-  zip -r pi-kernel-$cdate.zip .
+  zip -r zappi-kernel-$cdate.zip .
   cd ..
 else
   echo "Build failed."
