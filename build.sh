@@ -67,7 +67,8 @@ package_kernel () {
   # clean up bloat from symlinked sources
   rm -rf out/lib/modules/*/build
   rm -rf out/lib/modules/*/source
-  # copy kernel files
+  # copy over install script & kernel files
+  cp install.sh out/
   cp arch/arm/boot/dts/*.dtb out/boot/
   cp arch/arm/boot/dts/overlays/*.dtb* out/boot/overlays/
   cp arch/arm/boot/dts/overlays/README out/boot/overlays/
