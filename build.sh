@@ -92,10 +92,10 @@ package_kernel () {
     cp arch/arm/boot/dts/overlays/README out/boot/overlays/
     cp arch/arm/boot/zImage out/boot/$KERNEL.img
   else
-    cp arch/arm64/boot/dts/broadcom/*.dtb /boot/
-    cp arch/arm64/boot/dts/overlays/*.dtb* /boot/overlays/
-    cp arch/arm64/boot/dts/overlays/README /boot/overlays/
-    cp arch/arm64/boot/Image /boot/$KERNEL.img
+    cp arch/arm64/boot/dts/broadcom/*.dtb out/boot/
+    cp arch/arm64/boot/dts/overlays/*.dtb* out/boot/overlays/
+    cp arch/arm64/boot/dts/overlays/README out/boot/overlays/
+    cp arch/arm64/boot/Image out/boot/$KERNEL.img
   fi
   # zip the files
   cd out
