@@ -60,9 +60,9 @@
 #endif
 
 #define ksm_debug(fmt, ...) \
-	printk(KERN_DEBUG "[ksm:%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+	pr_debug("[ksm:%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
 #define ksm_err(fmt, ...) \
-	printk(KERN_ERR "[ksm:%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+	pr_err("[ksm:%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
 
 /**
  * DOC: Overview
