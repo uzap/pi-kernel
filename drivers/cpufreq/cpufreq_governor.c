@@ -436,9 +436,7 @@ int cpufreq_dbs_governor_init(struct cpufreq_policy *policy)
 	 * of the CPU and it also cannot be too small for dbs_update() to work
 	 * correctly.
 	 */
-	dbs_data->sampling_rate = max_t(unsigned int,
-					CPUFREQ_DBS_MIN_SAMPLING_INTERVAL,
-					cpufreq_policy_transition_delay_us(policy));
+	dbs_data->sampling_rate = jiffies_to_usecs(10);
 
 	if (!have_governor_per_policy())
 		gov->gdbs_data = dbs_data;
