@@ -44,5 +44,21 @@ echo "Installing kernel to $BOOT_DIR & modules to $LIB_DIR..."
 cp -r boot/. "$BOOT_DIR" || (echo "Failed to install in $BOOT_DIR" && exit 1)
 cp -r lib/. "$LIB_DIR" || (echo "Failed to install in $LIB_DIR" && exit 1)
 
+# comment out raspi-config ondemand tuning
+if [ -f /etc/init.d/raspi-config ]; then
+  if [ ! -f /etc/init.d/.raspi-config ]; then
+    echo
+    echo "Backing up old raspi-config as /etc/init.d/.raspi-config..."
+    cp /etc/init.d/raspi-config /etc/init.d/.raspi-config
+    echo "To restore, run:"
+    echo "  sudo cp /etc/init.d/.raspi-config /etc/init.d/raspi-config"
+  fi
+  echo
+  echo "Commenting out RasPiOS changes to ondemand cpufreq governor, if needed..."
+  sed -i '/up_threshold/s/^#*/#/' /etc/init.d/raspi-config
+  sed -i '/sampling_rate/s/^#*/#/' /etc/init.d/raspi-config
+  sed -i '/sampling_down_factor/s/^#*/#/' /etc/init.d/raspi-config
+fi
+
 echo
 echo "Installation successful. Reboot for changes to take effect."
