@@ -15,9 +15,6 @@ BOOT_DIR="/boot"
 # some (older/Raspbian) systems retain this file structure
 LIB_DIR="/lib"
 
-# we do not expect to fail!
-FAILED=0
-
 # script requires root
 if [ $(id -u) -ne 0 ]; then
   echo
@@ -44,10 +41,8 @@ fi
 
 # install the files, exit on failure
 echo "Installing kernel to $BOOT_DIR & modules to $LIB_DIR..."
-cp -r boot/. "$BOOT_DIR" || FAILED=1
-if [ $FAILED -ne 0 ]; then echo "Failed to install in $BOOT_DIR"; exit 1; fi
-cp -r lib/. "$LIB_DIR" || FAILED=1
-if [ $FAILED -ne 0 ]; then echo "Failed to install in $LIB_DIR"; exit 1; fi
+cp -r boot/. "$BOOT_DIR" || (echo "Failed to install in $BOOT_DIR" && exit 1)
+cp -r lib/. "$LIB_DIR" || (echo "Failed to install in $LIB_DIR" && exit 1)
 
 echo
 echo "Installation successful. Reboot for changes to take effect."
