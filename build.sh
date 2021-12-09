@@ -80,7 +80,7 @@ package_kernel () {
   # make the output directory
   mkdir -p out/boot/overlays
   # install modules to output dir
-  make INSTALL_MOD_PATH=out modules_install
+  make INSTALL_MOD_PATH=out modules_install || exit 1
   # clean up bloat from symlinked sources
   rm -rf out/lib/modules/*/build
   rm -rf out/lib/modules/*/source
@@ -117,15 +117,10 @@ fi
 
 # compile the kernel (save output to build.log)
 if [ ! -n "$BITS" ]; then
-  logsave build.log make -j$JOBS zImage modules dtbs
+  logsave build.log make -j$JOBS zImage modules dtbs || exit 1
 else
-  logsave build.log make -j$JOBS Image modules dtbs
+  logsave build.log make -j$JOBS Image modules dtbs || exit 1
 fi
 
-# check for image before packaging
-if [ ! -e arch/arm/boot/zImage ]; then
-  echo "Build failed."
-else
-  package_kernel
-fi
+package_kernel
 
