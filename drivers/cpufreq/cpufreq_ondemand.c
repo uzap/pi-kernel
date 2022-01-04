@@ -137,22 +137,29 @@ static void od_update(struct cpufreq_policy *policy)
 	struct od_policy_dbs_info *dbs_info = to_dbs_info(policy_dbs);
 	struct dbs_data *dbs_data = policy_dbs->dbs_data;
 	struct od_dbs_tuners *od_tuners = dbs_data->tuners;
+	unsigned int min_f = policy->cpuinfo.min_freq;
+	unsigned int max_f = policy->cpuinfo.max_freq;
 	unsigned int load = dbs_update(policy);
+	unsigned int freq_next, thresh_slice;
 
 	dbs_info->freq_lo = 0;
 
+	if (dbs_data->up_threshold >= 40)
+		thresh_slice = dbs_data->up_threshold >> 2;
+	else
+		thresh_slice = dbs_data->up_threshold >> 1;
+
+	if (load > thresh_slice)
+		policy_dbs->rate_mult = dbs_data->sampling_down_factor;
+
 	/* Check for frequency increase */
 	if (load > dbs_data->up_threshold) {
-		/* If switching to max speed, apply sampling_down_factor */
-		if (policy->cur < policy->max)
-			policy_dbs->rate_mult = dbs_data->sampling_down_factor;
 		dbs_freq_increase(policy, policy->max);
+	} else if (load > thresh_slice) {
+		freq_next = min_f + dbs_data->up_threshold * (max_f - min_f) / 100;
+		dbs_freq_increase(policy, freq_next);
 	} else {
 		/* Calculate the next frequency proportional to load */
-		unsigned int freq_next, min_f, max_f;
-
-		min_f = policy->cpuinfo.min_freq;
-		max_f = policy->cpuinfo.max_freq;
 		freq_next = min_f + load * (max_f - min_f) / 100;
 
 		/* No longer fully busy, reset rate_mult */
