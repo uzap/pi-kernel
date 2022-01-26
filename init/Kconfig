@@ -1382,6 +1382,14 @@ config CC_OPTIMIZE_FOR_SIZE
 
 endchoice
 
+config CLANG_COMPILER_RT
+	bool "Allows use of compiler-rt"
+	depends on CC_IS_CLANG
+	help
+	  Choosing this option will pass "-rtlib=compiler-rt" making it
+	  possible to use compiler-rt runtime libs. This requires the
+	  target arch to have their specific runtime libs compiled.
+
 config HAVE_LD_DEAD_CODE_DATA_ELIMINATION
 	bool
 	help
