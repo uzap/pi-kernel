@@ -108,6 +108,9 @@ make "$CONFIG"_defconfig
 # enable full clang lto (change FULL to THIN for ThinLTO)
 scripts/config -e LTO_CLANG_FULL
 
+scripts/config -e CLANG_COMPILER_RT
+scripts/config -e CC_OPTIMIZE_FOR_PERFORMANCE_O3_POLLY
+
 # configure cfi for arm64
 if [ "$BITS" = 64 ]; then
   scripts/config -e CFI_CLANG
