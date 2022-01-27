@@ -1374,6 +1374,14 @@ config CC_OPTIMIZE_FOR_PERFORMANCE_O3
 	  Choosing this option will pass "-O3" to your compiler to optimize
 	  the kernel yet more for performance.
 
+config CC_OPTIMIZE_FOR_PERFORMANCE_O3_POLLY
+	bool "Optimize using polly"
+	depends on CC_IS_CLANG
+	help
+	  Choosing this option will pass the flags required to enable polly
+	  automatic vector code generation. Requires Clang with polly
+	  enabled.
+
 config CC_OPTIMIZE_FOR_SIZE
 	bool "Optimize for size (-Os)"
 	help
