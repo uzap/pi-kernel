@@ -424,8 +424,8 @@ HOST_LFS_LDFLAGS := $(shell getconf LFS_LDFLAGS 2>/dev/null)
 HOST_LFS_LIBS := $(shell getconf LFS_LIBS 2>/dev/null)
 
 ifneq ($(LLVM),)
-HOSTCC	= clang
-HOSTCXX	= clang++
+HOSTCC	= $(CPATH)clang
+HOSTCXX	= $(CPATH)clang++
 else
 HOSTCC	= gcc
 HOSTCXX	= g++
@@ -443,14 +443,14 @@ KBUILD_HOSTLDLIBS   := $(HOST_LFS_LIBS) $(HOSTLDLIBS)
 # Make variables (CC, etc...)
 CPP		= $(CC) -E
 ifneq ($(LLVM),)
-CC		= clang
-LD		= ld.lld
-AR		= llvm-ar
-NM		= llvm-nm
-OBJCOPY		= llvm-objcopy
-OBJDUMP		= llvm-objdump
-READELF		= llvm-readelf
-STRIP		= llvm-strip
+CC		= $(CPATH)clang
+LD		= $(CPATH)ld.lld
+AR		= $(CPATH)llvm-ar
+NM		= $(CPATH)llvm-nm
+OBJCOPY		= $(CPATH)llvm-objcopy
+OBJDUMP		= $(CPATH)llvm-objdump
+READELF		= $(CPATH)llvm-readelf
+STRIP		= $(CPATH)llvm-strip
 else
 CC		= $(CROSS_COMPILE)gcc
 LD		= $(CROSS_COMPILE)ld
