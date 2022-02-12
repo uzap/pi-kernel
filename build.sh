@@ -3,6 +3,10 @@
 # compile with clang/llvm
 export LLVM=1
 
+LLVM_DIR=$HOME/zllvm/llvm-pgo/out
+export CPATH=$LLVM_DIR/bin/
+export LDFLAGS="-L$LLVM_DIR/lib/"
+
 # set number of jobs for make based on cpu
 JOBS=`grep processor /proc/cpuinfo|wc -l`
 # current date
