@@ -1,0 +1,121 @@
+#!/usr/bin/make -f
+
+# Build using LLVM
+export LLVM = 1
+
+# Disable to run without building kernel
+BUILD_KERNEL = yes
+# Disable to run without packaging kernel
+PACKAGE_KERNEL = yes
+
+# Set to configure llvm not installed by system
+LLVM_DIR = /usr
+export CPATH = $(LLVM_DIR)/bin/
+
+ifneq ("$(LLVM_DIR)","/usr")
+	export LDFLAGS = -L$(LLVM_DIR)/lib/
+endif
+
+# Define # of jobs and date
+JOBS = $(shell grep processor /proc/cpuinfo|wc -l)
+CDATE = $(shell date "+%Y-%m-%d")
+
+# Defaults set to 64-bit
+TARGET_CONFIG = bcm2711
+ARCH = arm64
+IMAGE = Image
+KERNEL = kernel8
+
+# Full clang Link Time Optimization
+# Adds to compilation time
+LTO_CONFIGS = scripts/config -e LTO_CLANG_FULL;
+
+# Optional; Requires LLVM with -polly and compiler-rt support
+OPT_CONFIGS = \
+	scripts/config -e CLANG_COMPILER_RT; \
+	scripts/config -e CC_OPTIMIZE_FOR_PERFORMANCE_O3_POLLY;
+
+# Only 64-bit builds support CFI
+LTO64_CONFIGS = \
+	scripts/config -e CFI_CLANG; \
+	scripts/config -e CFI_CLANG_SHADOW; \
+	scripts/config -d CFI_PERMISSIVE;
+
+EXTRA_CONFIGS := $(LTO_CONFIGS) $(OPT_CONFIGS)
+
+define package_kernel
+	mkdir -p out/$1/boot/overlays
+	make INSTALL_MOD_PATH=out/$1 modules_install
+	rm -rf out/$1/lib/modules/*/build
+	rm -rf out/$1/lib/modules/*/source
+	cp install.sh out/$1/
+if test $(ARCH) = arm64; then \
+	cp arch/$(ARCH)/boot/dts/broadcom/*.dtb out/$1/boot/; \
+else \
+	cp arch/$(ARCH)/boot/dts/*.dtb out/$1/boot/; \
+fi
+	cp arch/$(ARCH)/boot/dts/overlays/*.dtb* out/$1/boot/overlays/
+	cp arch/$(ARCH)/boot/dts/overlays/README out/$1/boot/overlays/
+	cp arch/$(ARCH)/boot/$(IMAGE) out/$1/boot/$(KERNEL).img
+	cd out/$1; zip -r zap-kernel_$1-$(CDATE).zip .
+endef
+
+default: rpi64
+
+all: rpi64 rpi4 rpi2 rpi
+
+rpi64:
+	make ARCH=$(ARCH) $(TARGET_CONFIG)_defconfig
+	@$(EXTRA_CONFIGS) $(LTO64_CONFIGS)
+ifeq ($(BUILD_KERNEL),yes)
+	make ARCH=$(ARCH) -j$(JOBS) $(IMAGE) modules dtbs
+endif
+ifeq ($(PACKAGE_KERNEL),yes)
+	$(call package_kernel,$@)
+endif
+
+rpi4 rpi400:
+	$(eval KERNEL = kernel7l)
+	$(eval IMAGE = zImage)
+	$(eval ARCH = arm)
+	make ARCH=$(ARCH) $(TARGET_CONFIG)_defconfig
+	@$(EXTRA_CONFIGS)
+ifeq ($(BUILD_KERNEL),yes)
+	make ARCH=$(ARCH) -j$(JOBS) $(IMAGE) modules dtbs
+endif
+ifeq ($(PACKAGE_KERNEL),yes)
+	$(call package_kernel,$@)
+endif
+
+rpi2 rpi3 rpi02w:
+	$(eval TARGET_CONFIG = bcm2709)
+	$(eval KERNEL = kernel7)
+	$(eval IMAGE = zImage)
+	$(eval ARCH = arm)
+	make ARCH=$(ARCH) $(TARGET_CONFIG)_defconfig
+	@$(EXTRA_CONFIGS)
+ifeq ($(BUILD_KERNEL),yes)
+	make ARCH=$(ARCH) -j$(JOBS) $(IMAGE) modules dtbs
+endif
+ifeq ($(PACKAGE_KERNEL),yes)
+	$(call package_kernel,$@)
+endif
+
+rpi rpi0 rpi0w:
+	$(eval TARGET_CONFIG = bcmrpi)
+	$(eval KERNEL = kernel)
+	$(eval IMAGE = zImage)
+	$(eval ARCH = arm)
+	make ARCH=$(ARCH) $(TARGET_CONFIG)_defconfig
+	@$(EXTRA_CONFIGS)
+ifeq ($(BUILD_KERNEL),yes)
+	make ARCH=$(ARCH) -j$(JOBS) $(IMAGE) modules dtbs
+endif
+ifeq ($(PACKAGE_KERNEL),yes)
+	$(call package_kernel,$@)
+endif
+
+clean:
+	rm -rf out
+
+.PHONY: default all clean rpi64 rpi4 rpi400 rpi2 rpi3 rpi02w rpi rpi0 rpi0w
