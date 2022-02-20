@@ -57,7 +57,7 @@ fi
 	cp arch/$(ARCH)/boot/dts/overlays/*.dtb* out/$1/boot/overlays/
 	cp arch/$(ARCH)/boot/dts/overlays/README out/$1/boot/overlays/
 	cp arch/$(ARCH)/boot/$(IMAGE) out/$1/boot/$(KERNEL).img
-	cd out/$1; zip -r zap-kernel_$1-$(CDATE).zip .
+	cd out/$1; zip -r zap-kernel_$1-$(CDATE).zip . -x '*.zip'
 endef
 
 default: rpi64
