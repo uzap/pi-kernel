@@ -32,7 +32,6 @@ LTO_CONFIGS = scripts/config -e LTO_CLANG_FULL;
 
 # Optional; Requires LLVM with -polly and compiler-rt support
 OPT_CONFIGS = \
-	scripts/config -e CLANG_COMPILER_RT; \
 	scripts/config -e CC_OPTIMIZE_FOR_PERFORMANCE_O3_POLLY;
 
 # Only 64-bit builds support CFI
