@@ -47,7 +47,7 @@ define package_kernel
 	make INSTALL_MOD_PATH=out/$1 modules_install
 	rm -rf out/$1/lib/modules/*/build
 	rm -rf out/$1/lib/modules/*/source
-	cp install.sh out/$1/
+	cp zap/install.sh out/$1/
 if test $(ARCH) = arm64; then \
 	cp arch/$(ARCH)/boot/dts/broadcom/*.dtb out/$1/boot/; \
 else \
