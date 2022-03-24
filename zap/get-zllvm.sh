@@ -6,11 +6,11 @@ KEY_IMPORTED=`(gpg --quiet --list-keys --keyid-format=long | grep -q $FINGERPRIN
 
 cd $INSTALL_DIR
 echo "\nDownloading the latest ZapDragon LLVM release..."
-curl --output latest.tar.xz https://cdn.zap.ooo/dl/zllvm/x86/latest.tar.xz
+curl --output zllvm-latest.tar.xz https://cdn.zap.ooo/dl/zllvm/x86/latest.tar.xz
 
 if [ "$1" != "--no-verify" ]; then
   echo "\nDownloading signature for verification..."
-  curl --output latest.tar.xz.asc https://cdn.zap.ooo/dl/zllvm/x86/latest.tar.xz.asc
+  curl --output zllvm-latest.tar.xz.asc https://cdn.zap.ooo/dl/zllvm/x86/latest.tar.xz.asc
 
   if [ "$KEY_IMPORTED" != "yes" ]; then
     echo "\nImporting uZap Maintainer public key..."
@@ -22,12 +22,12 @@ if [ "$1" != "--no-verify" ]; then
   fi
 
   echo "\nVerifying download..."
-  gpg --verify latest.tar.xz.asc latest.tar.xz || \
+  gpg --verify zllvm-latest.tar.xz.asc zllvm-latest.tar.xz || \
     { echo "\nFailed to verify compressed tarball."; exit 1; }
 fi
 
 echo "\nExtracting compressed file..."
-tar -xf latest.tar.xz
+tar -xf zllvm-latest.tar.xz
 
 echo "ZapDragon LLVM installed in $PWD/zllvm-14.\n"
 echo "Use the following parameter to build using zllvm:"
