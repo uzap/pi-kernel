@@ -14,7 +14,7 @@ if [ "$1" != "--no-verify" ]; then
 
   if [ "$KEY_IMPORTED" != "yes" ]; then
     echo "\nImporting uZap Maintainer public key..."
-    gpg --keyserver pgp.mit.edu --recv-keys $FINGERPRINT
+    gpg --recv-keys $FINGERPRINT
 
     # Check again to ensure the right key was imported
     (gpg --list-keys --keyid-format=long | grep -q $FINGERPRINT) || \
