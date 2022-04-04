@@ -1,0 +1,41 @@
+#!/bin/sh
+
+CDATE=`date "+%Y-%m-%d"`
+RELEASE="zap-kernel-$CDATE"
+LAST_RELEASE=`git tag | grep "zap-kernel" | tail -1`
+
+echo "Appending ZAP changes to changes.txt...\n"
+if [ ! -z $LAST_RELEASE ]; then
+  echo "## Changelog:\n" > changes.txt
+  git log --oneline $LAST_RELEASE^..HEAD >> changes.txt
+else
+  echo "\nInitial release. Using zdiff.sh..."
+  echo "## ZAP Changes:\n" > changes.txt
+  sh zap/zdiff.sh
+  cat zap/changes.log >> changes.txt
+fi
+
+cat changes.txt
+echo "\nPress ENTER to upload $RELEASE to GitHub." && head -n 1 >/dev/null
+
+echo "\nGenerating and pushing a signed tag..."
+git tag -s -a $RELEASE -m "Tag for release $RELEASE."
+git push origin $RELEASE
+
+echo "\nCreating a release for GitHub and uploading files..."
+gh release create -F changes.txt -t $RELEASE $RELEASE
+
+for target in `ls out`; do
+  echo "\nSigning $target zip file..."
+  gpg --detach-sign --armor --output \
+    out/$target/zap-kernel_$target-$CDATE.zip.asc \
+    out/$target/zap-kernel_$target-$CDATE.zip
+
+  echo "\nUploading file and signature for $target..."
+  gh release upload $RELEASE \
+    out/$target/zap-kernel_$target-$CDATE.zip.asc \
+    out/$target/zap-kernel_$target-$CDATE.zip
+done
+
+echo "\nFinished. Cleaning up extra file(s)..."
+rm -f zap/changes.log changes.txt
