@@ -1,4 +1,4 @@
-#/bin/sh
+#!/bin/sh
 
 BRANCH=stable
 REF=rpi/rpi-5.15.y

@@ -1,4 +1,4 @@
-#/bin/sh
+#!/bin/sh
 # NEVER RUN A SCRIPT AS ROOT WITHOUT INSPECTING IT FIRST!
 # AND REMEMBER TO KEEP A BACKUP!
 
@@ -16,7 +16,7 @@ BOOT_DIR="/boot"
 LIB_DIR="/lib"
 
 # script requires root
-if [ $(id -u) -ne 0 ]; then
+if [ "$(id -u)" -ne 0 ]; then
   echo
   echo "Need root permission to run."
   echo "Please inspect the file and run with sudo."

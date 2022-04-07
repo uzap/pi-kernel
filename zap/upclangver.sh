@@ -1,7 +1,7 @@
 #!/bin/sh
 
-CLANG_VERSION=`clang --version | head -1`
-FILE_VERSION=`cat $PWD/clangversion.txt`
+CLANG_VERSION=$(clang --version | head -1)
+FILE_VERSION=$(cat "$PWD"/clangversion.txt)
 
 echo "$CLANG_VERSION"
 
